@@ -1,0 +1,23 @@
+[project]
+name = "rooms"
+version = "0.1.0"
+description = "A 2D tactical roguelike inspired by The Backrooms — sanity and environmental hazards over combat."
+requires-python = ">=3.11"
+dependencies = [
+    "tcod>=21.2.1",
+    "numpy>=2.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
