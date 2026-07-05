@@ -5,10 +5,18 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from backrooms.entity.components.ai import BaseAI
+    from backrooms.entity.components.consumable import ConsumableComponent
+    from backrooms.entity.components.dialogue import DialogueComponent
+    from backrooms.entity.components.equipment import EquipmentComponent
+    from backrooms.entity.components.equippable import EquippableComponent
+    from backrooms.entity.components.experience import ExperienceComponent
     from backrooms.entity.components.fighter import Fighter
     from backrooms.entity.components.hazard import HazardComponent
+    from backrooms.entity.components.hunger import HungerComponent
     from backrooms.entity.components.inventory import Inventory
     from backrooms.entity.components.light_source import LightSourceComponent
+    from backrooms.entity.components.perception import PerceptionComponent
+    from backrooms.entity.components.quickness import QuicknessComponent
     from backrooms.entity.components.sanity import SanityComponent
 
 
@@ -36,6 +44,7 @@ class Entity:
         name: str,
         *,
         blocks_movement: bool = False,
+        blocks_sight: bool = False,
         render_order: RenderOrder = RenderOrder.ACTOR,
         is_hallucination: bool = False,
         hallucination_expires_at: int | None = None,
@@ -47,6 +56,14 @@ class Entity:
         sanity: "SanityComponent | None" = None,
         light_source: "LightSourceComponent | None" = None,
         hazard: "HazardComponent | None" = None,
+        perception: "PerceptionComponent | None" = None,
+        experience: "ExperienceComponent | None" = None,
+        consumable: "ConsumableComponent | None" = None,
+        quickness: "QuicknessComponent | None" = None,
+        hunger: "HungerComponent | None" = None,
+        dialogue: "DialogueComponent | None" = None,
+        equipment: "EquipmentComponent | None" = None,
+        equippable: "EquippableComponent | None" = None,
     ) -> None:
         self.x = x
         self.y = y
@@ -54,6 +71,11 @@ class Entity:
         self.color = color
         self.name = name
         self.blocks_movement = blocks_movement
+        # A tile-transparency override, not a GameMap.tiles property -- see
+        # GameMap.compute_fov, which layers this over the base tile
+        # transparency each time FOV is recomputed. Lets a column/pillar
+        # entity block sight without needing its own wall tile underneath.
+        self.blocks_sight = blocks_sight
         self.render_order = render_order
 
         # Marks entities spawned by the hallucination system: they look and
@@ -70,14 +92,29 @@ class Entity:
         self.causes_dread = causes_dread
         self.dread_radius = dread_radius
 
-        self.ai = ai
-        self.fighter = fighter
-        self.inventory = inventory
-        self.sanity = sanity
-        self.light_source = light_source
-        self.hazard = hazard
-
-        for component in (ai, fighter, inventory, sanity, light_source, hazard):
+        # Single source of truth for "what components exist on an Entity":
+        # each is set as an attribute AND wired with its `.entity` backref
+        # from this one dict, instead of a hand-written assignment plus a
+        # separately-maintained wiring tuple that has to list the exact same
+        # components in a second place.
+        components: dict[str, object | None] = {
+            "ai": ai,
+            "fighter": fighter,
+            "inventory": inventory,
+            "sanity": sanity,
+            "light_source": light_source,
+            "hazard": hazard,
+            "perception": perception,
+            "experience": experience,
+            "consumable": consumable,
+            "quickness": quickness,
+            "hunger": hunger,
+            "dialogue": dialogue,
+            "equipment": equipment,
+            "equippable": equippable,
+        }
+        for name, component in components.items():
+            setattr(self, name, component)
             if component is not None:
                 component.entity = self
 

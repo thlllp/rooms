@@ -62,3 +62,49 @@ FLOOR = new_tile(
     light=(ord(" "), Color.WHITE, Color.FLOOR_LIT),
     tile_id="floor",
 )
+
+# A deliberate, player-triggered exit -- see TriggerKind.FEATURE_STEPPED_ON --
+# distinct from the organic hazard/sanity/turn-count transitions: standing on
+# one always advances, on demand, regardless of level. tile_id is generic
+# ("stairs_down") because each LevelDefinition's own TransitionRule decides
+# where its stairs actually lead, not the tile itself.
+STAIRS_DOWN = new_tile(
+    walkable=True,
+    transparent=True,
+    dark=(ord(">"), Color.STAIRS, Color.FLOOR_DARK),
+    light=(ord(">"), Color.STAIRS, Color.FLOOR_LIT),
+    tile_id="stairs_down",
+)
+
+# The other flavor of exit feature -- set into a room's wall rather than
+# standing free in the floor (see generator_office._place_exit_feature), so
+# its background matches the wall tiles around it, not the floor.
+DOOR_EXIT = new_tile(
+    walkable=True,
+    transparent=True,
+    dark=(ord("+"), Color.DOOR, Color.WALL_DARK),
+    light=(ord("+"), Color.DOOR, Color.WALL_LIT),
+    tile_id="door_exit",
+)
+
+# Level 2's "giant car garage" reskin of WALL/FLOOR -- same shape/tile_id
+# semantics (still walkable/transparent the same way, still whatever
+# generate_office_level plugs in for LevelDefinition.wall_tile/floor_tile),
+# just grey concrete instead of office wallpaper/carpet, with their own
+# tile_id so look mode gets garage-flavored text (see rendering/ui.py)
+# instead of the office wall/floor descriptions.
+GARAGE_WALL = new_tile(
+    walkable=False,
+    transparent=False,
+    dark=(ord(" "), Color.WHITE, Color.GARAGE_WALL_DARK),
+    light=(ord(" "), Color.WHITE, Color.GARAGE_WALL_LIT),
+    tile_id="garage_wall",
+)
+
+GARAGE_FLOOR = new_tile(
+    walkable=True,
+    transparent=True,
+    dark=(ord(" "), Color.WHITE, Color.GARAGE_FLOOR_DARK),
+    light=(ord(" "), Color.WHITE, Color.GARAGE_FLOOR_LIT),
+    tile_id="garage_floor",
+)

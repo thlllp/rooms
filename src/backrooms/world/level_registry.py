@@ -14,6 +14,10 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Callable
 
+import numpy as np
+
+from backrooms.world import tile_types
+
 if TYPE_CHECKING:
     from backrooms.entity.entity import Entity
     from backrooms.world.game_map import GameMap
@@ -28,10 +32,67 @@ class TriggerKind(Enum):
     RANDOM_CHANCE_PER_TURN = auto()
 
 
+class LevelKind(Enum):
+    """Tags a level as one of a small number of structural 'kinds'
+    generate_office_level knows how to build. A level just carries this tag
+    (LevelDefinition.kind) rather than repeating room-size/column/exit
+    numbers itself -- see LEVEL_STYLES below for what each kind actually
+    means."""
+
+    INDOOR = auto()  # cramped cubicle maze -- level_0/level_1's original feel
+    SPACIOUS = auto()  # open, cavernous, fills the map -- level_2's feel
+
+
+class LevelStability(Enum):
+    """Tags whether a level id is regenerated fresh every time it's entered
+    (UNSTABLE -- the default, and level_1_office's whole "endless shifting
+    maze" identity) or generated once and cached thereafter (STABLE -- the
+    same rooms, the same remaining entities, killed enemies stay dead and
+    looted items stay gone, every time you come back). See
+    Engine.load_level, the only place this is read."""
+
+    UNSTABLE = auto()
+    STABLE = auto()
+
+
+@dataclass(frozen=True)
+class LevelStyle:
+    room_min_size: int
+    room_max_size: int
+    # None -> one column at each large room's center. An int instead spaces
+    # a grid of columns this many tiles apart across each large room's
+    # interior -- a denser "support pillar" cavern feel.
+    column_spacing: int | None
+    # Opts out of the usual stairs/door exit tile placed in the open floor
+    # in favor of walking off the map's edges -- see actions.MovementAction
+    # and generator_office.py's forced one-room-per-wall placement. Pair
+    # with a TransitionRule keyed on EVENT_FLAG_SET / "map_edge_exited".
+    uses_edge_exit: bool
+    # Room placement tries much harder to pack the available space full
+    # instead of leaving the usual gaps -- see generator_office.py.
+    fill_screen: bool
+
+
+LEVEL_STYLES: dict[LevelKind, LevelStyle] = {
+    LevelKind.INDOOR: LevelStyle(
+        room_min_size=4, room_max_size=9, column_spacing=None, uses_edge_exit=False, fill_screen=False
+    ),
+    LevelKind.SPACIOUS: LevelStyle(
+        room_min_size=16, room_max_size=28, column_spacing=5, uses_edge_exit=True, fill_screen=True
+    ),
+}
+
+
 @dataclass(frozen=True)
 class DestinationOption:
     level_id: str
     weight: float = 1.0
+    # Added to `weight`, scaled by Engine.level_repeat_streak, before picking
+    # -- lets a destination become more likely the longer the current level
+    # type has repeated in a row (e.g. a door's chance of leading somewhere
+    # new growing with how many times you've looped the same level), without
+    # the engine needing a special case for any specific level or rule.
+    weight_per_streak: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -63,14 +124,17 @@ class TransitionRule:
             return ctx.rng.random() < self.chance_per_turn
         raise AssertionError(f"Unhandled trigger kind: {self.trigger}")
 
-    def pick_destination(self, rng: random.Random) -> str:
+    def pick_destination(self, rng: random.Random, *, level_repeat_streak: int = 0) -> str:
         if len(self.destinations) == 1:
             return self.destinations[0].level_id
-        total = sum(d.weight for d in self.destinations)
+        weights = [max(0.0, d.weight + d.weight_per_streak * level_repeat_streak) for d in self.destinations]
+        total = sum(weights)
+        if total <= 0:
+            return self.destinations[0].level_id
         roll = rng.uniform(0, total)
         upto = 0.0
-        for option in self.destinations:
-            upto += option.weight
+        for option, w in zip(self.destinations, weights):
+            upto += w
             if roll <= upto:
                 return option.level_id
         return self.destinations[-1].level_id  # float rounding fallback
@@ -82,6 +146,12 @@ class SpawnEntry:
     weight: float = 1.0
     min_count: int = 0
     max_count: int = 1
+    # None -> every instance placed independently anywhere on the map (the
+    # original behavior). An int instead places the first instance anywhere,
+    # then every further instance within this many tiles of it -- lets one
+    # SpawnEntry describe a clustered "encampment" of NPCs rather than
+    # scattered individuals. See spawner.spawn_from_table.
+    cluster_radius: int | None = None
 
 
 @dataclass(frozen=True)
@@ -93,8 +163,44 @@ class LevelDefinition:
     darkness_factor: float = 1.0
     spawn_table: tuple[SpawnEntry, ...] = field(default_factory=tuple)
     hazard_table: tuple[SpawnEntry, ...] = field(default_factory=tuple)
+    # Purely decorative clutter (desks, oil drums, ...) -- a third
+    # SpawnEntry table resolved the same way as spawn_table/hazard_table
+    # (see spawner.spawn_from_table), so it shares that mechanism's
+    # bonus_max scaling with Engine.level_repeat_streak for free: entries
+    # with max_count=0 place nothing on a fresh visit and start
+    # accumulating the more times in a row the level repeats.
+    furniture_table: tuple[SpawnEntry, ...] = field(default_factory=tuple)
     transition_rules: tuple[TransitionRule, ...] = field(default_factory=tuple)
     is_entry_level: bool = False
+    # Chance generate_office_level embeds a door in a wall instead of placing
+    # the usual stairs tile for the level's single stepped-on exit feature --
+    # a generator-agnostic knob read via GenerationContext.level_def, so the
+    # generator itself never needs to special-case a level id.
+    door_exit_chance: float = 0.0
+    # Ambient illumination independent of the player's own light source --
+    # Engine.update_fov and sanity_system._darkness_drain both check this so
+    # a well-lit level gives full FOV and no darkness sanity drain whether or
+    # not the player's light is lit/fueled.
+    is_well_lit: bool = False
+    # Reskin knobs for generate_office_level, read via
+    # GenerationContext.level_def -- a level gets a different color palette
+    # without the generator special-casing a level id. Defaults match the
+    # generator's own previous hardcoded values.
+    wall_tile: np.ndarray = field(default_factory=lambda: tile_types.WALL)
+    floor_tile: np.ndarray = field(default_factory=lambda: tile_types.FLOOR)
+    # Which structural kind of level this is -- room size, column density,
+    # exit style, and screen-filling all come from LEVEL_STYLES[kind] rather
+    # than being repeated per level (see LevelKind/LevelStyle above).
+    kind: LevelKind = LevelKind.INDOOR
+    # Whether this level id regenerates fresh every time or is cached and
+    # reused (see LevelStability above).
+    stability: LevelStability = LevelStability.UNSTABLE
+    # The "isolation phenomenon" -- True (the default) means two dialogue-
+    # bearing NPCs on this level can never interact with each other, no
+    # matter how close together they end up (see systems/npc_social.py).
+    # Encampments/colonies are meaningless without this being False, so a
+    # level author flips it only once that level is meant to allow them.
+    isolation: bool = True
 
 
 @dataclass

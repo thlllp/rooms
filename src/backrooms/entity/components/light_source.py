@@ -11,12 +11,12 @@ if TYPE_CHECKING:
 
 
 class LightSourceComponent(BaseComponent):
-    def __init__(self, max_fuel: float = 100.0, radius: int = 4, burn_rate: float = 1.0) -> None:
+    def __init__(self, max_fuel: float = 100.0, radius: int = 4, burn_rate: float = 1.0, *, is_lit: bool = True) -> None:
         self.max_fuel = max_fuel
         self.fuel = max_fuel
         self.radius = radius
         self.burn_rate = burn_rate
-        self.is_lit = True
+        self.is_lit = is_lit
 
 
 def tick_light_fuel(entity: "Entity", engine: "Engine") -> None:

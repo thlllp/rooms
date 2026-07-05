@@ -85,4 +85,10 @@ def generate_flooded_level(ctx: "GenerationContext") -> GameMap:
         game_map.tiles[x, y] = tile_types.FLOOR
 
     game_map.spawn_point = next(iter(floor_tiles))
+
+    if len(floor_tiles) >= 2:
+        spawn_x, spawn_y = game_map.spawn_point
+        stairs_x, stairs_y = max(floor_tiles, key=lambda t: (t[0] - spawn_x) ** 2 + (t[1] - spawn_y) ** 2)
+        game_map.tiles[stairs_x, stairs_y] = tile_types.STAIRS_DOWN
+
     return game_map

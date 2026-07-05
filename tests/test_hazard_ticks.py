@@ -1,8 +1,18 @@
+import random
+
 from backrooms.entity.components.fighter import Fighter
-from backrooms.entity.components.hazard import make_spore_zone, make_unstable_floor, tick_spore_damage, tick_unstable_floor
+from backrooms.entity.components.hazard import (
+    make_debris_pile,
+    make_spore_zone,
+    make_unstable_floor,
+    tick_debris_pile,
+    tick_spore_damage,
+    tick_unstable_floor,
+)
 from backrooms.entity.components.light_source import LightSourceComponent, tick_light_fuel
 from backrooms.entity.components.sanity import SanityComponent
 from backrooms.entity.entity import Entity, RenderOrder
+from backrooms.world.game_map import GameMap
 
 
 class FakeLog:
@@ -18,6 +28,14 @@ class FakeEngine:
         self.player = player
         self.message_log = FakeLog()
         self.event_flags = set()
+        self.game_over = False
+        self.rng = random.Random(0)
+        self.game_map = GameMap(20, 20)
+
+    def kill_entity(self, entity):
+        if entity is self.player:
+            self.game_over = True
+            self.message_log.add_message("Everything goes quiet.")
 
 
 def _make_player(**kwargs):
@@ -61,6 +79,18 @@ def test_spore_damage_applies_within_radius():
     assert any("Spores" in m for m in engine.message_log.messages)
 
 
+def test_spore_damage_kills_player_and_sets_game_over():
+    player = _make_player(fighter=Fighter(hp=2), sanity=SanityComponent(max_sanity=100))
+    player.place(5, 5)
+    spore = Entity(5, 6, char='"', color=(0, 0, 0), name="Spore", render_order=RenderOrder.HAZARD, hazard=make_spore_zone(radius=1, severity=3.0))
+    engine = FakeEngine(player)
+
+    tick_spore_damage(spore, engine)
+
+    assert player.fighter.hp == 0
+    assert engine.game_over
+
+
 def test_spore_damage_no_effect_outside_radius():
     player = _make_player(fighter=Fighter(hp=10))
     player.place(0, 0)
@@ -95,6 +125,74 @@ def test_unstable_floor_sets_event_flag_after_threshold_steps():
     assert "floor_collapsed" not in engine.event_flags
     tick_unstable_floor(floor_hazard, engine)
     assert "floor_collapsed" in engine.event_flags
+
+
+def _spawn_loot():
+    return Entity(0, 0, char="!", color=(0, 0, 0), name="Loot", render_order=RenderOrder.ITEM)
+
+
+def test_debris_pile_grants_item_on_good_outcome():
+    player = _make_player(sanity=SanityComponent(max_sanity=100))
+    player.place(5, 5)
+    pile = Entity(
+        5,
+        5,
+        char="%",
+        color=(0, 0, 0),
+        name="Debris Pile",
+        render_order=RenderOrder.HAZARD,
+        hazard=make_debris_pile(item_factories=(_spawn_loot,), good_chance=1.0, sanity_penalty=10.0),
+    )
+    engine = FakeEngine(player)
+    engine.game_map.entities.add(pile)
+
+    tick_debris_pile(pile, engine)
+
+    assert pile not in engine.game_map.entities
+    assert any(e.name == "Loot" for e in engine.game_map.entities)
+    assert player.sanity.current == 100  # untouched
+
+
+def test_debris_pile_drains_sanity_on_bad_outcome():
+    player = _make_player(sanity=SanityComponent(max_sanity=100))
+    player.place(5, 5)
+    pile = Entity(
+        5,
+        5,
+        char="%",
+        color=(0, 0, 0),
+        name="Debris Pile",
+        render_order=RenderOrder.HAZARD,
+        hazard=make_debris_pile(item_factories=(_spawn_loot,), good_chance=0.0, sanity_penalty=15.0),
+    )
+    engine = FakeEngine(player)
+    engine.game_map.entities.add(pile)
+
+    tick_debris_pile(pile, engine)
+
+    assert pile not in engine.game_map.entities
+    assert player.sanity.current == 85.0
+
+
+def test_debris_pile_does_nothing_until_player_steps_on_it():
+    player = _make_player(sanity=SanityComponent(max_sanity=100))
+    player.place(0, 0)
+    pile = Entity(
+        5,
+        5,
+        char="%",
+        color=(0, 0, 0),
+        name="Debris Pile",
+        render_order=RenderOrder.HAZARD,
+        hazard=make_debris_pile(item_factories=(_spawn_loot,), good_chance=1.0),
+    )
+    engine = FakeEngine(player)
+    engine.game_map.entities.add(pile)
+
+    tick_debris_pile(pile, engine)
+
+    assert pile in engine.game_map.entities
+    assert player.sanity.current == 100
 
 
 def test_unstable_floor_only_counts_steps_while_player_present():

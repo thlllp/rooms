@@ -7,15 +7,21 @@ references a generator function directly, only registry lookups by id.
 from __future__ import annotations
 
 from backrooms.constants import Color
-from backrooms.entity.components.ai import WanderingAI
+from backrooms.entity.components.ai import HostileAI, WanderingAI
+from backrooms.entity.components.consumable import make_hp_for_sanity_item, make_hp_restore_item, make_sanity_restore_item
+from backrooms.entity.components.dialogue import DialogueComponent
+from backrooms.entity.components.equippable import EquippableComponent
 from backrooms.entity.components.fighter import Fighter
-from backrooms.entity.components.hazard import make_spore_zone, make_unstable_floor
+from backrooms.entity.components.hazard import make_debris_pile, make_spore_zone, make_unstable_floor
 from backrooms.entity.entity import Entity, RenderOrder
-from backrooms.procgen.generator_flooded import generate_flooded_level
 from backrooms.procgen.generator_office import generate_office_level
+from backrooms.world import tile_types
+from backrooms.world.crafting import CraftingRecipe, register_recipe
 from backrooms.world.level_registry import (
     DestinationOption,
     LevelDefinition,
+    LevelKind,
+    LevelStability,
     SpawnEntry,
     TransitionRule,
     TriggerKind,
@@ -28,7 +34,7 @@ def _spawn_spore_zone() -> Entity:
         0,
         0,
         char='"',
-        color=Color.HAZARD,
+        color=Color.SPORE_PINK,
         name="Spore Cloud",
         render_order=RenderOrder.HAZARD,
         hazard=make_spore_zone(radius=1, severity=2.0),
@@ -59,7 +65,159 @@ def _spawn_wanderer() -> Entity:
         causes_dread=True,
         dread_radius=5,
         ai=WanderingAI(perception_radius=8),
-        fighter=Fighter(hp=1, defense=0, power=0),
+        fighter=Fighter(hp=1, endurance=0, power=0),
+    )
+
+
+def _spawn_hollow() -> Entity:
+    return Entity(
+        0,
+        0,
+        char="h",
+        color=(180, 60, 60),
+        name="Hollow",
+        blocks_movement=True,
+        render_order=RenderOrder.ACTOR,
+        causes_dread=True,
+        dread_radius=4,
+        ai=HostileAI(perception_radius=8),
+        fighter=Fighter(hp=6, endurance=0, power=2, xp_reward=10),
+    )
+
+
+def _spawn_almond_water() -> Entity:
+    return Entity(
+        0,
+        0,
+        char="!",
+        color=(230, 222, 190),
+        name="Almond Water Bottle",
+        render_order=RenderOrder.ITEM,
+        consumable=make_sanity_restore_item(30.0),
+    )
+
+
+# Debris-pile loot for level_1_office (see LEVEL_1_OFFICE's hazard_table) --
+# a small pool of possible finds instead of always the same one item.
+def _spawn_first_aid_kit() -> Entity:
+    return Entity(
+        0, 0, char="+", color=(220, 60, 60), name="First Aid Kit", render_order=RenderOrder.ITEM,
+        consumable=make_hp_restore_item(15.0),
+    )
+
+
+def _spawn_rag() -> Entity:
+    return Entity(
+        0, 0, char="~", color=(200, 195, 180), name="Rag", render_order=RenderOrder.ITEM,
+        consumable=make_hp_restore_item(5.0),
+    )
+
+
+def _spawn_liquid_pain() -> Entity:
+    return Entity(
+        0, 0, char="!", color=(140, 40, 90), name="Liquid Pain", render_order=RenderOrder.ITEM,
+        consumable=make_hp_for_sanity_item(hp_amount=20.0, sanity_cost=10.0),
+    )
+
+
+def _spawn_duct_tape() -> Entity:
+    return Entity(
+        0, 0, char="-", color=(150, 150, 40), name="Duct Tape", render_order=RenderOrder.ITEM,
+        consumable=make_sanity_restore_item(15.0),
+    )
+
+
+# Crafted, not found -- see the recipe registered below. Face-slot
+# equipment: full protection against spore damage/sanity drain while worn
+# (see hazard.tick_spore_damage), no effect on anything else.
+def _spawn_mask() -> Entity:
+    return Entity(
+        0, 0, char="[", color=(90, 90, 100), name="Mask", render_order=RenderOrder.ITEM,
+        equippable=EquippableComponent(slot="face", spore_resistance=1.0),
+    )
+
+
+register_recipe(CraftingRecipe(name="Mask", ingredients=("Duct Tape", "Rag"), result_factory=_spawn_mask))
+
+
+# Peaceful NPC -- the starting slice of the interaction framework. Reuses
+# WanderingAI (already non-hostile, never attacks) rather than a new AI
+# class; the only thing distinguishing it from a hostile wanderer is
+# causes_dread=False (just another person, not unsettling) plus dialogue.
+# Only ever registered on levels with isolation=False -- see
+# LEVEL_2_GARAGE's spawn_table and systems/npc_social.py.
+def _spawn_colonist() -> Entity:
+    return Entity(
+        0,
+        0,
+        char="p",
+        color=(200, 175, 140),
+        name="Survivor",
+        blocks_movement=True,
+        render_order=RenderOrder.ACTOR,
+        ai=WanderingAI(perception_radius=8),
+        dialogue=DialogueComponent(
+            lines=(
+                "You're... you're actually real?",
+                "I've stopped counting the days.",
+                "Don't trust the ones that look like almost-people.",
+                "We stick together out here. Safer that way.",
+                "Have you seen the walls move, or is it just me?",
+            )
+        ),
+    )
+
+
+# Purely decorative clutter -- see LevelDefinition.furniture_table. Static,
+# no hazard/ai/etc, just something that's there and blocks a tile. Unlike
+# _make_column, deliberately doesn't set blocks_sight -- desk/cabinet height
+# clutter isn't meant to create the same tactical sightline gaps a
+# floor-to-ceiling support column does.
+def _spawn_desk() -> Entity:
+    return Entity(0, 0, char="d", color=(120, 90, 60), name="Desk", blocks_movement=True, render_order=RenderOrder.HAZARD)
+
+
+def _spawn_filing_cabinet() -> Entity:
+    return Entity(
+        0, 0, char="f", color=(100, 100, 110), name="Filing Cabinet", blocks_movement=True, render_order=RenderOrder.HAZARD
+    )
+
+
+# Searchable, one-shot: resolves into either a dropped item or a sanity hit
+# the moment the player steps onto it, then removes itself (see
+# make_debris_pile/tick_debris_pile). Not on level_0_office -- these are
+# meant for the levels the player is stuck looping through.
+def _spawn_debris_pile_office() -> Entity:
+    return Entity(
+        0,
+        0,
+        char="%",
+        color=Color.DEBRIS,
+        name="Debris Pile",
+        render_order=RenderOrder.HAZARD,
+        hazard=make_debris_pile(
+            item_factories=(
+                _spawn_almond_water,
+                _spawn_first_aid_kit,
+                _spawn_rag,
+                _spawn_liquid_pain,
+                _spawn_duct_tape,
+            ),
+            good_chance=0.6,
+            sanity_penalty=10.0,
+        ),
+    )
+
+
+def _spawn_debris_pile_garage() -> Entity:
+    return Entity(
+        0,
+        0,
+        char="%",
+        color=Color.DEBRIS,
+        name="Debris Pile",
+        render_order=RenderOrder.HAZARD,
+        hazard=make_debris_pile(item_factories=(_spawn_almond_water,), good_chance=0.6, sanity_penalty=10.0),
     )
 
 
@@ -68,10 +226,20 @@ LEVEL_OFFICE = register(
         id="level_0_office",
         display_name="Level 0",
         generator=generate_office_level,
-        ambient_sanity_drain=0.05,
-        darkness_factor=1.0,
+        # ~1 sanity per 5 turns before willpower mitigation (SanityComponent.drain
+        # subtracts willpower from the combined total each turn) -- the intended
+        # early-game baseline; deeper levels should drain faster than this.
+        ambient_sanity_drain=0.2,
+        is_well_lit=True,
         is_entry_level=True,
-        spawn_table=(SpawnEntry(factory=_spawn_wanderer, weight=1.0, min_count=1, max_count=1),),
+        kind=LevelKind.INDOOR,
+        stability=LevelStability.UNSTABLE,
+        isolation=True,
+        spawn_table=(
+            SpawnEntry(factory=_spawn_wanderer, weight=1.0, min_count=1, max_count=1),
+            SpawnEntry(factory=_spawn_hollow, weight=1.0, min_count=1, max_count=1),
+            SpawnEntry(factory=_spawn_almond_water, weight=1.0, min_count=1, max_count=2),
+        ),
         hazard_table=(
             SpawnEntry(factory=_spawn_spore_zone, weight=1.0, min_count=1, max_count=2),
             SpawnEntry(factory=_spawn_unstable_floor, weight=1.0, min_count=1, max_count=1),
@@ -80,42 +248,136 @@ LEVEL_OFFICE = register(
             TransitionRule(
                 trigger=TriggerKind.EVENT_FLAG_SET,
                 event_flag="floor_collapsed",
-                destinations=(DestinationOption("level_flooded", 1.0),),
+                destinations=(DestinationOption("level_1_office", 1.0),),
                 message="The floor gives way beneath your feet entirely.",
             ),
             TransitionRule(
-                trigger=TriggerKind.SANITY_BELOW,
-                sanity_threshold=15,
-                destinations=(DestinationOption("level_flooded", 1.0),),
-                message="The hum grows deafening. The floor gives way beneath you.",
-            ),
-            TransitionRule(
-                trigger=TriggerKind.RANDOM_CHANCE_PER_TURN,
-                chance_per_turn=0.002,
-                min_turns_in_level=50,
-                destinations=(
-                    DestinationOption("level_flooded", 0.7),
-                    DestinationOption("level_0_office", 0.3),
-                ),
-                message="You blink, and nothing is where it was.",
+                trigger=TriggerKind.FEATURE_STEPPED_ON,
+                feature_tile_id="stairs_down",
+                destinations=(DestinationOption("level_1_office", 1.0),),
+                message="You take the stairs down.",
             ),
         ),
     )
 )
 
-LEVEL_FLOODED = register(
+# The only level past the entry, for now -- no flooded/cave sublevels. Its
+# own exit feature loops back into a freshly generated instance of itself
+# (see generate_office_level, called fresh by load_level() every time), so
+# past level 0 the game is an endless procedurally-regenerating office maze
+# rather than a fixed sequence of distinct areas. door_exit_chance gives that
+# feature a 50/50 chance of being a door in the wall instead of the usual
+# floor-standing stairs -- same effect, different flavor (see the matching
+# door_exit rule below and TILE_DESCRIPTIONS["door_exit"] in rendering/ui.py).
+LEVEL_1_OFFICE = register(
     LevelDefinition(
-        id="level_flooded",
-        display_name="The Flooded Sublevel",
-        generator=generate_flooded_level,
-        ambient_sanity_drain=0.15,
-        darkness_factor=1.4,
+        id="level_1_office",
+        display_name="Level 1",
+        generator=generate_office_level,
+        ambient_sanity_drain=0.2,
+        is_well_lit=True,
+        door_exit_chance=0.5,
+        kind=LevelKind.INDOOR,
+        stability=LevelStability.UNSTABLE,
+        isolation=True,
+        spawn_table=(
+            SpawnEntry(factory=_spawn_wanderer, weight=1.0, min_count=1, max_count=1),
+            SpawnEntry(factory=_spawn_hollow, weight=1.0, min_count=1, max_count=1),
+            SpawnEntry(factory=_spawn_almond_water, weight=1.0, min_count=1, max_count=2),
+        ),
+        hazard_table=(
+            SpawnEntry(factory=_spawn_spore_zone, weight=1.0, min_count=1, max_count=2),
+            SpawnEntry(factory=_spawn_unstable_floor, weight=1.0, min_count=1, max_count=1),
+            SpawnEntry(factory=_spawn_debris_pile_office, weight=1.0, min_count=1, max_count=1),
+        ),
+        # Empty on a fresh visit -- accumulates the longer you keep
+        # regenerating this same level in a row (see Engine.level_repeat_streak,
+        # spawner.spawn_from_table's bonus_max).
+        furniture_table=(
+            SpawnEntry(factory=_spawn_desk, weight=1.0, min_count=0, max_count=0),
+            SpawnEntry(factory=_spawn_filing_cabinet, weight=1.0, min_count=0, max_count=0),
+        ),
         transition_rules=(
             TransitionRule(
-                trigger=TriggerKind.TURN_COUNT_ELAPSED,
-                turn_threshold=300,
-                destinations=(DestinationOption("level_0_office", 1.0),),
-                message="Something forces you out.",
+                trigger=TriggerKind.EVENT_FLAG_SET,
+                event_flag="floor_collapsed",
+                destinations=(DestinationOption("level_1_office", 1.0),),
+                message="The floor gives way beneath your feet entirely.",
+            ),
+            TransitionRule(
+                trigger=TriggerKind.FEATURE_STEPPED_ON,
+                feature_tile_id="stairs_down",
+                destinations=(DestinationOption("level_1_office", 1.0),),
+                message="You take the stairs down.",
+            ),
+            TransitionRule(
+                trigger=TriggerKind.FEATURE_STEPPED_ON,
+                feature_tile_id="door_exit",
+                # Chance of leading to level_2_garage instead of another
+                # level_1_office loop grows with Engine.level_repeat_streak
+                # (how many times in a row you've regenerated level_1_office)
+                # -- 0% the first time you find a door, rising the longer
+                # you've been stuck repeating this level type. See
+                # DestinationOption.weight_per_streak.
+                destinations=(
+                    DestinationOption("level_1_office", weight=1.0),
+                    DestinationOption("level_2_garage", weight=0.0, weight_per_streak=0.25),
+                ),
+                message="You open the door and step through.",
+            ),
+        ),
+    )
+)
+
+# A third look entirely -- a giant car garage, grey concrete instead of the
+# office levels' warm wallpaper/carpet (see LevelDefinition.wall_tile/
+# floor_tile and tile_types.GARAGE_WALL/GARAGE_FLOOR). Tagged SPACIOUS
+# (see LevelKind/LEVEL_STYLES) rather than INDOOR like level_0/level_1:
+# much bigger rooms packed to fill the map, fewer/shorter corridors, a
+# scattered grid of support columns per room instead of one dead center, and
+# no stairs/door exit tile -- walking off any edge of the map is the way out,
+# Caves-of-Qud style (see actions.MovementAction._handle_edge,
+# generator_office.py's forced one-room-per-wall placement, and the
+# map_edge_exited rule below). STABLE: each direction you exit through leads
+# to its own persistent zone -- walk back the way you came and it's the SAME
+# garage you left (same layout, same remaining loot/enemies); a wall you
+# haven't crossed before generates a brand new one (see
+# Engine._load_stable_zone). Reachable from level_1_office's door (see the
+# destinations above).
+LEVEL_2_GARAGE = register(
+    LevelDefinition(
+        id="level_2_garage",
+        display_name="Level 2",
+        generator=generate_office_level,
+        ambient_sanity_drain=0.2,
+        is_well_lit=True,
+        wall_tile=tile_types.GARAGE_WALL,
+        floor_tile=tile_types.GARAGE_FLOOR,
+        kind=LevelKind.SPACIOUS,
+        stability=LevelStability.STABLE,
+        # The first level to allow the "colony" side of the NPC interaction
+        # framework -- isolation=False lets Survivors here actually interact
+        # with each other (see systems/npc_social.py), and the encampment
+        # entry below places a cluster of 2-4 of them together rather than
+        # scattering them independently (see SpawnEntry.cluster_radius).
+        isolation=False,
+        spawn_table=(
+            SpawnEntry(factory=_spawn_wanderer, weight=1.0, min_count=1, max_count=1),
+            SpawnEntry(factory=_spawn_hollow, weight=1.0, min_count=1, max_count=1),
+            SpawnEntry(factory=_spawn_almond_water, weight=1.0, min_count=1, max_count=2),
+            SpawnEntry(factory=_spawn_colonist, weight=1.0, min_count=2, max_count=4, cluster_radius=6),
+        ),
+        # No floor hazards (spore cloud, unstable floor) here -- just the
+        # searchable debris pile. Guaranteed at least one per visit
+        # (min_count=1), growing with Engine.level_repeat_streak same as
+        # every other SpawnEntry table.
+        hazard_table=(SpawnEntry(factory=_spawn_debris_pile_garage, weight=1.0, min_count=1, max_count=1),),
+        transition_rules=(
+            TransitionRule(
+                trigger=TriggerKind.EVENT_FLAG_SET,
+                event_flag="map_edge_exited",
+                destinations=(DestinationOption("level_2_garage", 1.0),),
+                message="The garage keeps going, well past where the light gives out.",
             ),
         ),
     )

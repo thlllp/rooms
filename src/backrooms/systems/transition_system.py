@@ -33,7 +33,7 @@ def evaluate_transitions(engine: "Engine") -> bool:
 
     for rule in level_def.transition_rules:
         if rule.is_satisfied(ctx):
-            destination_id = rule.pick_destination(engine.rng)
+            destination_id = rule.pick_destination(engine.rng, level_repeat_streak=engine.level_repeat_streak)
             _perform_noclip(engine, destination_id, rule.message)
             return True
 

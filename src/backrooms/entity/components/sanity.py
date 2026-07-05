@@ -25,9 +25,19 @@ SANITY_BANDS: tuple[SanityBand, ...] = (
 
 
 class SanityComponent(BaseComponent):
-    def __init__(self, max_sanity: int = 100, *, history_window: int = 12, repeat_ratio_threshold: float = 0.4) -> None:
+    def __init__(
+        self,
+        max_sanity: int = 100,
+        *,
+        willpower: float = 0.0,
+        history_window: int = 12,
+        repeat_ratio_threshold: float = 0.4,
+    ) -> None:
         self.max_sanity = float(max_sanity)
         self.current = float(max_sanity)
+        # Flat mental-drain mitigation, subtracted from every drain() call
+        # before it's applied -- the sanity-side counterpart to Fighter.endurance.
+        self.willpower = willpower
         self._repeat_ratio_threshold = repeat_ratio_threshold
         # Rolling window of recently-visited tiles, used to detect "pacing in
         # a loop" (the Backrooms "the halls repeat" cue) -- lives here rather
@@ -42,7 +52,8 @@ class SanityComponent(BaseComponent):
         return SANITY_BANDS[-1]
 
     def drain(self, amount: float) -> None:
-        self.current = max(0.0, self.current - amount)
+        mitigated = max(0.0, amount - self.willpower)
+        self.current = max(0.0, self.current - mitigated)
 
     def restore(self, amount: float) -> None:
         self.current = min(self.max_sanity, self.current + amount)

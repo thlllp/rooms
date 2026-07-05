@@ -24,11 +24,13 @@ SAFE_ZONE_RESTORE = 0.5
 
 
 def _darkness_drain(engine: "Engine") -> float:
+    level_def = LEVEL_REGISTRY[engine.current_level_id]
+    if level_def.is_well_lit:
+        return 0.0
     player = engine.player
     light = player.light_source
     if light is not None and light.is_lit and light.fuel > 0:
         return 0.0
-    level_def = LEVEL_REGISTRY[engine.current_level_id]
     return UNLIT_DARKNESS_DRAIN * level_def.darkness_factor
 
 
