@@ -4,7 +4,7 @@ import random
 
 from backrooms.constants import DEFAULT_FOV_RADIUS, MAP_HEIGHT, MAP_WIDTH, UNLIT_FOV_RADIUS, Color
 from backrooms.entity.entity import Entity
-from backrooms.procgen.spawner import spawn_from_table
+from backrooms.procgen.spawner import random_walkable_tile_near, spawn_from_table
 from backrooms.systems import auto_explore
 from backrooms.systems.ai_system import process_ai
 from backrooms.systems.dev_tools import log_level_overview
@@ -150,6 +150,16 @@ class Engine:
         spawn_from_table(game_map, level_def.spawn_table, self.rng, bonus_max=self.level_repeat_streak)
         spawn_from_table(game_map, level_def.hazard_table, self.rng, bonus_max=self.level_repeat_streak)
         spawn_from_table(game_map, level_def.furniture_table, self.rng, bonus_max=self.level_repeat_streak)
+
+        if game_map.settlement_door_position is not None and level_def.sign_factory is not None:
+            tile = random_walkable_tile_near(
+                game_map, self.rng, game_map.settlement_door_position, 2, exclude=game_map.settlement_door_position
+            )
+            if tile is not None:
+                sign = level_def.sign_factory()
+                sign.place(*tile)
+                game_map.entities.add(sign)
+
         return game_map
 
     def _load_stable_zone(

@@ -108,3 +108,28 @@ GARAGE_FLOOR = new_tile(
     light=(ord(" "), Color.WHITE, Color.GARAGE_FLOOR_LIT),
     tile_id="garage_floor",
 )
+
+# A settlement's own exit feature -- same FEATURE_STEPPED_ON mechanics as
+# DOOR_EXIT (generic tile_id, LevelDefinition's own TransitionRule decides
+# where it leads), just a distinct look/tile_id so it reads as "the way into
+# a settlement" rather than "another loop of the level you're already on"
+# (see generator_office._place_settlement_door, registrations.LEVEL_2_GARAGE).
+SETTLEMENT_DOOR = new_tile(
+    walkable=True,
+    transparent=True,
+    dark=(ord("+"), Color.SETTLEMENT_DOOR, Color.WALL_DARK),
+    light=(ord("+"), Color.SETTLEMENT_DOOR, Color.WALL_LIT),
+    tile_id="settlement_door",
+)
+
+# A settlement's floor -- warm/lived-in, and a safe zone (see
+# GameMap.is_safe_zone_at / sanity_system.SAFE_ZONE_RESTORE): sanity
+# actively recovers here instead of just not draining.
+SETTLEMENT_FLOOR = new_tile(
+    walkable=True,
+    transparent=True,
+    is_safe_zone=True,
+    dark=(ord(" "), Color.WHITE, Color.SETTLEMENT_FLOOR_DARK),
+    light=(ord(" "), Color.WHITE, Color.SETTLEMENT_FLOOR_LIT),
+    tile_id="settlement_floor",
+)

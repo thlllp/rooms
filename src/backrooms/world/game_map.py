@@ -34,6 +34,12 @@ class GameMap:
         # player entering a STABLE level's neighboring zone on the matching
         # side, instead of always at the same fixed spawn_point.
         self.edge_entry_points: dict[str, tuple[int, int]] = {}
+        # Set by generate_office_level._place_settlement_door when a
+        # settlement door was actually placed this generation (see
+        # LevelDefinition.settlement_door_chance) -- consumed by
+        # Engine._generate_map to drop a Sign next to it, since the
+        # generator only builds tiles, not entities.
+        self.settlement_door_position: tuple[int, int] | None = None
 
     def in_bounds(self, x: int, y: int) -> bool:
         return 0 <= x < self.width and 0 <= y < self.height

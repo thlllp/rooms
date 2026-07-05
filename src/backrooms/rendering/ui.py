@@ -24,6 +24,8 @@ TILE_LABELS = {
     "door_exit": "Door",
     "garage_wall": "Concrete Wall",
     "garage_floor": "Concrete Floor",
+    "settlement_door": "Door",
+    "settlement_floor": "Floor",
 }
 
 # Flavor text pools for look mode, keyed by tile_id. Several lines per kind
@@ -63,6 +65,15 @@ TILE_DESCRIPTIONS: dict[str, tuple[str, ...]] = {
         "A dark oil stain, long since dried, in the shape of nothing in particular.",
         "Faint tire marks curve toward a wall and stop.",
         "A painted parking line, faded almost to nothing.",
+    ),
+    "settlement_door": (
+        "Someone's reinforced this door from the other side.",
+        "A door that actually looks like it was built by a person, on purpose.",
+    ),
+    "settlement_floor": (
+        "Swept clean. Someone's been keeping this place up.",
+        "Warm underfoot, somehow -- the first surface here that feels lived-in.",
+        "Someone's laid out mismatched rugs to cover the worst of the floor.",
     ),
 }
 

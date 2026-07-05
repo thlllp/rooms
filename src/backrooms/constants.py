@@ -47,6 +47,15 @@ class Color:
     GARAGE_FLOOR_DARK = (20, 20, 20)
     GARAGE_FLOOR_LIT = (128, 128, 130)
 
+    # A settlement's door (leads to a small safe sublevel) and its floor (a
+    # warm, lived-in tone, distinct from the garage's grey concrete -- see
+    # tile_types.SETTLEMENT_DOOR/SETTLEMENT_FLOOR), plus the sign that marks
+    # one out on the map before you reach it.
+    SETTLEMENT_DOOR = (90, 200, 140)
+    SETTLEMENT_FLOOR_DARK = (26, 22, 14)
+    SETTLEMENT_FLOOR_LIT = (150, 120, 70)
+    SIGN = (210, 190, 140)
+
     PLAYER = (230, 230, 200)
 
     MESSAGE_LOG = (200, 200, 200)

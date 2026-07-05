@@ -33,19 +33,22 @@ def _random_walkable_tile(game_map: GameMap, rng: random.Random) -> tuple[int, i
     return rng.choice(walkable_coords)
 
 
-def _random_walkable_tile_near(
-    game_map: GameMap, rng: random.Random, center: tuple[int, int], radius: int
+def random_walkable_tile_near(
+    game_map: GameMap, rng: random.Random, center: tuple[int, int], radius: int, *, exclude: tuple[int, int] | None = None
 ) -> tuple[int, int] | None:
     """Same exclusions as _random_walkable_tile, restricted to a box around
     `center` -- falls back to None (never the unrestricted map) if nothing's
     free nearby, so a clustered entry either clusters or skips that instance
-    rather than silently scattering it far from the rest of its group."""
+    rather than silently scattering it far from the rest of its group.
+    `exclude` additionally rules out one specific tile (e.g. Engine._generate_map
+    placing a Sign near a settlement door -- the door tile itself is walkable
+    and would otherwise be a valid candidate, blocking the door)."""
     cx, cy = center
     candidates = [
         (x, y)
         for x in range(max(0, cx - radius), min(game_map.width, cx + radius + 1))
         for y in range(max(0, cy - radius), min(game_map.height, cy + radius + 1))
-        if game_map.tiles["walkable"][x, y] and not any(game_map.entities_at(x, y))
+        if game_map.tiles["walkable"][x, y] and not any(game_map.entities_at(x, y)) and (x, y) != exclude
     ]
     if not candidates:
         return None
@@ -65,7 +68,7 @@ def spawn_from_table(
             if rng.random() > entry.weight:
                 continue
             if entry.cluster_radius is not None and anchor is not None:
-                tile = _random_walkable_tile_near(game_map, rng, anchor, entry.cluster_radius)
+                tile = random_walkable_tile_near(game_map, rng, anchor, entry.cluster_radius)
             else:
                 tile = _random_walkable_tile(game_map, rng)
             if tile is None:

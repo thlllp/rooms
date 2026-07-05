@@ -144,8 +144,8 @@ register_recipe(CraftingRecipe(name="Mask", ingredients=("Duct Tape", "Rag"), re
 # WanderingAI (already non-hostile, never attacks) rather than a new AI
 # class; the only thing distinguishing it from a hostile wanderer is
 # causes_dread=False (just another person, not unsettling) plus dialogue.
-# Only ever registered on levels with isolation=False -- see
-# LEVEL_2_GARAGE's spawn_table and systems/npc_social.py.
+# Only ever registered on levels with isolation=False -- currently just
+# LEVEL_2_SETTLEMENT's spawn_table (see systems/npc_social.py).
 def _spawn_colonist() -> Entity:
     return Entity(
         0,
@@ -165,6 +165,22 @@ def _spawn_colonist() -> Entity:
                 "Have you seen the walls move, or is it just me?",
             )
         ),
+    )
+
+
+# Placed next to a settlement door (see LevelDefinition.settlement_door_chance/
+# sign_factory) -- purely a marker, reuses the dialogue/TalkAction bump
+# mechanic already built for NPCs rather than a new "read this" interaction.
+def _spawn_settlement_sign() -> Entity:
+    return Entity(
+        0,
+        0,
+        char="i",
+        color=Color.SIGN,
+        name="Sign",
+        blocks_movement=True,
+        render_order=RenderOrder.ACTOR,
+        dialogue=DialogueComponent(lines=("A hand-painted sign: \"SURVIVORS -- SAFE HAVEN THROUGH THE DOOR.\"",)),
     )
 
 
@@ -355,29 +371,84 @@ LEVEL_2_GARAGE = register(
         floor_tile=tile_types.GARAGE_FLOOR,
         kind=LevelKind.SPACIOUS,
         stability=LevelStability.STABLE,
-        # The first level to allow the "colony" side of the NPC interaction
-        # framework -- isolation=False lets Survivors here actually interact
-        # with each other (see systems/npc_social.py), and the encampment
-        # entry below places a cluster of 2-4 of them together rather than
-        # scattering them independently (see SpawnEntry.cluster_radius).
-        isolation=False,
+        # Colonies don't happen out in the open garage itself -- isolation
+        # stays True here. A settlement (where isolation=False and NPCs
+        # actually gather/interact) is a separate small sublevel behind a
+        # door, see settlement_door_chance/sign_factory below and
+        # LEVEL_2_SETTLEMENT.
         spawn_table=(
             SpawnEntry(factory=_spawn_wanderer, weight=1.0, min_count=1, max_count=1),
             SpawnEntry(factory=_spawn_hollow, weight=1.0, min_count=1, max_count=1),
             SpawnEntry(factory=_spawn_almond_water, weight=1.0, min_count=1, max_count=2),
-            SpawnEntry(factory=_spawn_colonist, weight=1.0, min_count=2, max_count=4, cluster_radius=6),
         ),
         # No floor hazards (spore cloud, unstable floor) here -- just the
         # searchable debris pile. Guaranteed at least one per visit
         # (min_count=1), growing with Engine.level_repeat_streak same as
         # every other SpawnEntry table.
         hazard_table=(SpawnEntry(factory=_spawn_debris_pile_garage, weight=1.0, min_count=1, max_count=1),),
+        # A settlement is a bonus find, not guaranteed every zone -- a sign
+        # (see sign_factory) marks it from a distance before the door itself
+        # is reached (see generator_office._place_settlement_door).
+        settlement_door_chance=0.3,
+        sign_factory=_spawn_settlement_sign,
         transition_rules=(
             TransitionRule(
                 trigger=TriggerKind.EVENT_FLAG_SET,
                 event_flag="map_edge_exited",
                 destinations=(DestinationOption("level_2_garage", 1.0),),
                 message="The garage keeps going, well past where the light gives out.",
+            ),
+            TransitionRule(
+                trigger=TriggerKind.FEATURE_STEPPED_ON,
+                feature_tile_id="settlement_door",
+                destinations=(DestinationOption("level_2_settlement", 1.0),),
+                message="You step through the door into a small, quiet room.",
+            ),
+        ),
+    )
+)
+
+# A small, enclosed, safe sublevel behind one of level_2_garage's settlement
+# doors -- INDOOR (small rooms) rather than SPACIOUS, and max_rooms caps it
+# to just a handful so it actually reads as "one small area" rather than
+# another sprawling maze. floor_tile=SETTLEMENT_FLOOR marks the whole thing
+# a safe zone (sanity actively recovers, see sanity_system.SAFE_ZONE_RESTORE).
+# STABLE with no edge-exit means every visit -- via any garage zone's door --
+# lands on the exact same cached zone (0,0): there's one persistent
+# settlement, not a new one per door (see Engine._load_stable_zone's
+# fallback for a STABLE level that never sets pending_edge_wall). Leaving is
+# a normal door back to level_2_garage's own canonical zone.
+LEVEL_2_SETTLEMENT = register(
+    LevelDefinition(
+        id="level_2_settlement",
+        display_name="Settlement",
+        generator=generate_office_level,
+        ambient_sanity_drain=0.0,
+        is_well_lit=True,
+        floor_tile=tile_types.SETTLEMENT_FLOOR,
+        kind=LevelKind.INDOOR,
+        stability=LevelStability.STABLE,
+        max_rooms=4,
+        door_exit_chance=1.0,
+        # The one place isolation is off and colonists actually gather --
+        # see _spawn_colonist/systems/npc_social.py.
+        isolation=False,
+        spawn_table=(
+            SpawnEntry(factory=_spawn_colonist, weight=1.0, min_count=2, max_count=4, cluster_radius=6),
+            SpawnEntry(factory=_spawn_almond_water, weight=1.0, min_count=0, max_count=1),
+        ),
+        transition_rules=(
+            TransitionRule(
+                trigger=TriggerKind.FEATURE_STEPPED_ON,
+                feature_tile_id="stairs_down",
+                destinations=(DestinationOption("level_2_garage", 1.0),),
+                message="You step back out into the garage.",
+            ),
+            TransitionRule(
+                trigger=TriggerKind.FEATURE_STEPPED_ON,
+                feature_tile_id="door_exit",
+                destinations=(DestinationOption("level_2_garage", 1.0),),
+                message="You step back out into the garage.",
             ),
         ),
     )

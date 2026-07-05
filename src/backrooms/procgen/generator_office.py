@@ -156,12 +156,16 @@ def _room_wall_perimeter(game_map: GameMap, room: RectangularRoom) -> list[tuple
     embedding a door directly into the wall rather than in the open floor.
     Checks walkability rather than a specific tile_id so this works
     regardless of which wall/floor tile theme a level uses (see
-    LevelDefinition.wall_tile/floor_tile)."""
+    LevelDefinition.wall_tile/floor_tile). in_bounds-filtered first: a
+    uses_edge_exit room is allowed to touch the map's true boundary (see
+    _carve_room), so room.x2/y2 can legitimately equal game_map.width/height
+    -- one past the last valid index -- with no wall tile out there to check.
+    """
     cells = [(x, room.y1) for x in range(room.x1 + 1, room.x2)]
     cells += [(x, room.y2) for x in range(room.x1 + 1, room.x2)]
     cells += [(room.x1, y) for y in range(room.y1 + 1, room.y2)]
     cells += [(room.x2, y) for y in range(room.y1 + 1, room.y2)]
-    return [(x, y) for x, y in cells if not game_map.tiles["walkable"][x, y]]
+    return [(x, y) for x, y in cells if game_map.in_bounds(x, y) and not game_map.tiles["walkable"][x, y]]
 
 
 def _place_exit_feature(
@@ -191,6 +195,28 @@ def _place_exit_feature(
     x, y = farthest.center
     game_map.tiles[x, y] = tile_types.STAIRS_DOWN
     return x, y
+
+
+def _place_settlement_door(
+    game_map: GameMap, rooms: list[RectangularRoom], rng: "random.Random", *, chance: float
+) -> None:
+    """Independent of the level's normal exit feature (stairs/door, or the
+    map-edge for uses_edge_exit levels) -- a settlement is a bonus find, not
+    the way forward, so it doesn't compete with or replace either. Picks any
+    room with a spare wall cell and embeds a settlement door there; records
+    the position on game_map for Engine._generate_map to drop a Sign next to
+    it (generators only build tiles here, entities are placed separately)."""
+    if not rooms or rng.random() >= chance:
+        return
+    candidates = list(rooms)
+    rng.shuffle(candidates)
+    for room in candidates:
+        wall_cells = _room_wall_perimeter(game_map, room)
+        if wall_cells:
+            x, y = rng.choice(wall_cells)
+            game_map.tiles[x, y] = tile_types.SETTLEMENT_DOOR
+            game_map.settlement_door_position = (x, y)
+            return
 
 
 def _carve_room(game_map: GameMap, room: RectangularRoom, floor_tile: np.ndarray) -> None:
@@ -250,14 +276,18 @@ def generate_office_level(ctx: "GenerationContext") -> GameMap:
     # applies instead.
     if ctx.level_def is not None:
         door_chance = ctx.level_def.door_exit_chance
+        settlement_door_chance = ctx.level_def.settlement_door_chance
         wall_tile = ctx.level_def.wall_tile
         floor_tile = ctx.level_def.floor_tile
         style = LEVEL_STYLES[ctx.level_def.kind]
+        max_rooms_override = ctx.level_def.max_rooms
     else:
         door_chance = 0.0
+        settlement_door_chance = 0.0
         wall_tile = tile_types.WALL
         floor_tile = tile_types.FLOOR
         style = LEVEL_STYLES[LevelKind.INDOOR]
+        max_rooms_override = None
 
     game_map = GameMap(ctx.width, ctx.height, wall_tile=wall_tile)
     rooms: list[RectangularRoom] = []
@@ -301,7 +331,10 @@ def generate_office_level(ctx: "GenerationContext") -> GameMap:
                 entry_point = (anchor.center[0], ctx.height - 1)
             game_map.edge_entry_points[wall] = entry_point
 
-    max_attempts = MAX_ROOMS_FILL_SCREEN if style.fill_screen else MAX_ROOMS
+    if max_rooms_override is not None:
+        max_attempts = max_rooms_override
+    else:
+        max_attempts = MAX_ROOMS_FILL_SCREEN if style.fill_screen else MAX_ROOMS
     for _ in range(max_attempts):
         room_width = ctx.rng.randint(style.room_min_size, style.room_max_size)
         room_height = ctx.rng.randint(style.room_min_size, style.room_max_size)
@@ -339,5 +372,6 @@ def generate_office_level(ctx: "GenerationContext") -> GameMap:
     stairs_position = (
         None if style.uses_edge_exit else _place_exit_feature(game_map, rooms, ctx.rng, door_chance=door_chance)
     )
+    _place_settlement_door(game_map, rooms, ctx.rng, chance=settlement_door_chance)
     _place_columns(game_map, rooms, exclude=stairs_position, column_spacing=style.column_spacing)
     return game_map

@@ -201,6 +201,24 @@ class LevelDefinition:
     # Encampments/colonies are meaningless without this being False, so a
     # level author flips it only once that level is meant to allow them.
     isolation: bool = True
+    # Chance generate_office_level embeds a settlement door in a room wall,
+    # in addition to (and independent of) the level's normal exit feature --
+    # a settlement is a separate small sublevel (LevelDefinition.max_rooms,
+    # TriggerKind.FEATURE_STEPPED_ON on "settlement_door"), not more of the
+    # level you're already on. 0.0 (the default) means this level never gets
+    # one. See generator_office._place_settlement_door.
+    settlement_door_chance: float = 0.0
+    # Caps how many rooms generate_office_level places, overriding
+    # LEVEL_STYLES[kind]'s normal MAX_ROOMS/MAX_ROOMS_FILL_SCREEN cap --
+    # None (the default) leaves the style's own cap untouched. Lets one
+    # INDOOR level (a settlement) be deliberately small/enclosed without
+    # changing every other INDOOR level sharing that same LevelStyle.
+    max_rooms: int | None = None
+    # Zero-arg Entity factory placed near a settlement door if one was
+    # generated (see settlement_door_chance) -- engine.py stays
+    # content-agnostic (it just calls this if set) while the actual Sign
+    # entity is defined as regular content in data/registrations.py.
+    sign_factory: Callable[[], "Entity"] | None = None
 
 
 @dataclass
