@@ -17,13 +17,22 @@ from backrooms.world.level_registry import LEVEL_STYLES, LevelKind
 if TYPE_CHECKING:
     import random
 
-    from backrooms.world.level_registry import GenerationContext
+    from backrooms.world.level_registry import GenerationContext, LevelStyle
 
 MAX_ROOMS = 42
 # fill_screen styles try this many placement attempts instead -- bigger rooms
 # reject more often as the map fills up, so packing it densely needs a much
 # larger attempt budget than a normal cubicle maze does.
 MAX_ROOMS_FILL_SCREEN = 400
+
+# Extra placement attempts, on top of a style's own max_rooms, allowed
+# specifically to get a non-edge-exit level up to at least 2 rooms (see the
+# min-room fallback in generate_office_level). A style with a small
+# max_rooms budget (e.g. LevelKind.SETTLEMENT's 3) can occasionally fail
+# every one of those attempts to overlap-free placement and end up with
+# only the spawn room -- generous enough that hitting this cap too is
+# vanishingly unlikely on a MAP_WIDTH x MAP_HEIGHT map.
+MIN_ROOMS_FALLBACK_ATTEMPTS = 500
 
 # How many placements to try before giving up on getting an edge-touching
 # room on a given wall (see _force_edge_room).
@@ -168,6 +177,16 @@ def _room_wall_perimeter(game_map: GameMap, room: RectangularRoom) -> list[tuple
     return [(x, y) for x, y in cells if game_map.in_bounds(x, y) and not game_map.tiles["walkable"][x, y]]
 
 
+def _farthest_room_from_spawn(rooms: list[RectangularRoom], spawn_point: tuple[int, int]) -> RectangularRoom:
+    """The single room _place_exit_feature and _place_inn both build around
+    -- farthest from spawn, so reaching either one means actually crossing
+    the level. Shared so the two selections can never independently drift
+    apart (they're deliberately meant to be the same room: see
+    _place_inn's docstring)."""
+    spawn_x, spawn_y = spawn_point
+    return max(rooms, key=lambda r: (r.center[0] - spawn_x) ** 2 + (r.center[1] - spawn_y) ** 2)
+
+
 def _place_exit_feature(
     game_map: GameMap, rooms: list[RectangularRoom], rng: "random.Random", *, door_chance: float
 ) -> tuple[int, int] | None:
@@ -182,8 +201,7 @@ def _place_exit_feature(
     the degenerate single-room case, where every room center is spawn."""
     if len(rooms) < 2:
         return None
-    spawn_x, spawn_y = game_map.spawn_point
-    farthest = max(rooms, key=lambda r: (r.center[0] - spawn_x) ** 2 + (r.center[1] - spawn_y) ** 2)
+    farthest = _farthest_room_from_spawn(rooms, game_map.spawn_point)
 
     if rng.random() < door_chance:
         wall_cells = _room_wall_perimeter(game_map, farthest)
@@ -217,6 +235,39 @@ def _place_settlement_door(
             game_map.tiles[x, y] = tile_types.SETTLEMENT_DOOR
             game_map.settlement_door_position = (x, y)
             return
+
+
+_EXIT_FEATURE_TILE_IDS = frozenset({str(tile_types.STAIRS_DOWN["tile_id"]), str(tile_types.DOOR_EXIT["tile_id"])})
+
+
+def _place_inn(game_map: GameMap, rooms: list[RectangularRoom], inn_floor_tile: np.ndarray) -> None:
+    """Reskins one whole room's interior as a small inn -- the same room
+    _place_exit_feature uses (see _farthest_room_from_spawn), since that's
+    deliberately the room farthest from spawn and there's no reason the
+    exit and the inn shouldn't share it. This doesn't gate progress like the
+    exit does, it's just a rest stop (see systems/rest_system.py). No-op in
+    the degenerate single-room case, where the only room is the one spawn is
+    already in."""
+    if len(rooms) < 2:
+        return
+    inn_room = _farthest_room_from_spawn(rooms, game_map.spawn_point)
+    _reskin_room_floor(game_map, inn_room, inn_floor_tile)
+
+
+def _reskin_room_floor(game_map: GameMap, room: RectangularRoom, floor_tile: np.ndarray) -> None:
+    """Like _carve_room, but skips any cell that's already an exit feature
+    (STAIRS_DOWN/DOOR_EXIT) instead of blindly re-flooding the whole
+    interior. _place_inn can land in the very room _place_exit_feature just
+    placed a stairs tile in (its fallback when no free wall cell was found
+    for a door) -- re-skinning that room's floor on top must never silently
+    overwrite its only way out."""
+    inner_x_start = room.x1 if room.x1 == 0 else room.x1 + 1
+    inner_y_start = room.y1 if room.y1 == 0 else room.y1 + 1
+    tile_ids = game_map.tiles["tile_id"]
+    for x in range(inner_x_start, room.x2):
+        for y in range(inner_y_start, room.y2):
+            if str(tile_ids[x, y]) not in _EXIT_FEATURE_TILE_IDS:
+                game_map.tiles[x, y] = floor_tile
 
 
 def _carve_room(game_map: GameMap, room: RectangularRoom, floor_tile: np.ndarray) -> None:
@@ -268,6 +319,52 @@ def _force_edge_room(
     return None
 
 
+def _attempt_room(
+    ctx: "GenerationContext",
+    game_map: GameMap,
+    rooms: list[RectangularRoom],
+    style: "LevelStyle",
+    floor_tile: np.ndarray,
+) -> bool:
+    """One random room-placement attempt for generate_office_level's main
+    fill loop: rolls a candidate rect and, if it doesn't overlap an existing
+    room, carves it, tunnels it to the previous room (or marks it the spawn
+    point, if it's the first), and appends it to `rooms`. Returns whether it
+    was actually placed -- False (a no-op) on an overlapping roll, so the
+    caller can keep trying rather than silently losing an attempt."""
+    room_width = ctx.rng.randint(style.room_min_size, style.room_max_size)
+    room_height = ctx.rng.randint(style.room_min_size, style.room_max_size)
+    if style.uses_edge_exit:
+        # Rooms are allowed to touch the map's true boundary (x1/y1 as low
+        # as 0, x2/y2 as high as ctx.width/ctx.height) instead of always
+        # leaving a 1-tile margin -- otherwise no floor tile is ever
+        # adjacent to the actual coordinate boundary, and
+        # MovementAction._handle_edge's out-of-bounds check can never fire
+        # no matter how far the player walks.
+        x = ctx.rng.randint(0, ctx.width - room_width)
+        y = ctx.rng.randint(0, ctx.height - room_height)
+    else:
+        x = ctx.rng.randint(1, ctx.width - room_width - 2)
+        y = ctx.rng.randint(1, ctx.height - room_height - 2)
+
+    new_room = RectangularRoom(x, y, room_width, room_height)
+    if any(new_room.intersects(other) for other in rooms):
+        return False
+
+    _carve_room(game_map, new_room, floor_tile)
+
+    if rooms:
+        double_wide = ctx.rng.random() < DOUBLE_WIDE_HALLWAY_CHANCE
+        _tunnel_between(
+            game_map, rooms[-1].center, new_room.center, ctx.rng, double_wide=double_wide, floor_tile=floor_tile
+        )
+    else:
+        game_map.spawn_point = new_room.center
+
+    rooms.append(new_room)
+    return True
+
+
 def generate_office_level(ctx: "GenerationContext") -> GameMap:
     # Reskin knob plus the level's structural "kind", read from the registry
     # entry driving this generation -- ctx.level_def is None only in
@@ -281,6 +378,7 @@ def generate_office_level(ctx: "GenerationContext") -> GameMap:
         floor_tile = ctx.level_def.floor_tile
         style = LEVEL_STYLES[ctx.level_def.kind]
         max_rooms_override = ctx.level_def.max_rooms
+        inn_floor_tile = ctx.level_def.inn_floor_tile
     else:
         door_chance = 0.0
         settlement_door_chance = 0.0
@@ -288,6 +386,7 @@ def generate_office_level(ctx: "GenerationContext") -> GameMap:
         floor_tile = tile_types.FLOOR
         style = LEVEL_STYLES[LevelKind.INDOOR]
         max_rooms_override = None
+        inn_floor_tile = None
 
     game_map = GameMap(ctx.width, ctx.height, wall_tile=wall_tile)
     rooms: list[RectangularRoom] = []
@@ -333,39 +432,26 @@ def generate_office_level(ctx: "GenerationContext") -> GameMap:
 
     if max_rooms_override is not None:
         max_attempts = max_rooms_override
+    elif style.max_rooms is not None:
+        max_attempts = style.max_rooms
     else:
         max_attempts = MAX_ROOMS_FILL_SCREEN if style.fill_screen else MAX_ROOMS
     for _ in range(max_attempts):
-        room_width = ctx.rng.randint(style.room_min_size, style.room_max_size)
-        room_height = ctx.rng.randint(style.room_min_size, style.room_max_size)
-        if style.uses_edge_exit:
-            # Rooms are allowed to touch the map's true boundary (x1/y1 as
-            # low as 0, x2/y2 as high as ctx.width/ctx.height) instead of
-            # always leaving a 1-tile margin -- otherwise no floor tile is
-            # ever adjacent to the actual coordinate boundary, and
-            # MovementAction._handle_edge's out-of-bounds check can never
-            # fire no matter how far the player walks.
-            x = ctx.rng.randint(0, ctx.width - room_width)
-            y = ctx.rng.randint(0, ctx.height - room_height)
-        else:
-            x = ctx.rng.randint(1, ctx.width - room_width - 2)
-            y = ctx.rng.randint(1, ctx.height - room_height - 2)
+        _attempt_room(ctx, game_map, rooms, style, floor_tile)
 
-        new_room = RectangularRoom(x, y, room_width, room_height)
-        if any(new_room.intersects(other) for other in rooms):
-            continue
-
-        _carve_room(game_map, new_room, floor_tile)
-
-        if rooms:
-            double_wide = ctx.rng.random() < DOUBLE_WIDE_HALLWAY_CHANCE
-            _tunnel_between(
-                game_map, rooms[-1].center, new_room.center, ctx.rng, double_wide=double_wide, floor_tile=floor_tile
-            )
-        else:
-            game_map.spawn_point = new_room.center
-
-        rooms.append(new_room)
+    # Non-edge-exit levels place their single stairs/door exit feature in a
+    # room other than spawn (_place_exit_feature, below) -- which needs at
+    # least 2 rooms to exist at all. A style with a small max_rooms budget
+    # (e.g. LevelKind.SETTLEMENT's 3) can occasionally fail every attempt
+    # above to a run of overlapping rolls and end up with only the spawn
+    # room. For a STABLE level (generated once and cached forever) that
+    # would be a permanently exit-less, unreachable-again level -- keep
+    # trying, past max_rooms, until there's somewhere for the exit to go.
+    if not style.uses_edge_exit:
+        extra_attempts = 0
+        while len(rooms) < 2 and extra_attempts < MIN_ROOMS_FALLBACK_ATTEMPTS:
+            _attempt_room(ctx, game_map, rooms, style, floor_tile)
+            extra_attempts += 1
 
     # Levels that use the map-edge exit skip the usual floor-standing exit
     # tile entirely instead of placing one nobody's meant to use.
@@ -373,5 +459,7 @@ def generate_office_level(ctx: "GenerationContext") -> GameMap:
         None if style.uses_edge_exit else _place_exit_feature(game_map, rooms, ctx.rng, door_chance=door_chance)
     )
     _place_settlement_door(game_map, rooms, ctx.rng, chance=settlement_door_chance)
+    if inn_floor_tile is not None:
+        _place_inn(game_map, rooms, inn_floor_tile)
     _place_columns(game_map, rooms, exclude=stairs_position, column_spacing=style.column_spacing)
     return game_map

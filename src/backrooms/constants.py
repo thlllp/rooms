@@ -56,6 +56,12 @@ class Color:
     SETTLEMENT_FLOOR_LIT = (150, 120, 70)
     SIGN = (210, 190, 140)
 
+    # A small inn room within a settlement -- warmer/brighter than the
+    # settlement's own floor so it reads as a distinct, cozier spot (see
+    # tile_types.INN_FLOOR).
+    INN_FLOOR_DARK = (30, 20, 12)
+    INN_FLOOR_LIT = (180, 130, 70)
+
     PLAYER = (230, 230, 200)
 
     MESSAGE_LOG = (200, 200, 200)
@@ -80,3 +86,10 @@ class Color:
     LOOK_BG = (55, 45, 15)
     LOOK_TEXT = (255, 235, 150)
     LOOK_FLAVOR_TEXT = (235, 230, 215)
+
+    # Click-to-travel preview (see rendering/ui.render_travel_path): the
+    # clicked destination tile gets the brighter of the two, the route
+    # leading to it a dimmer shade of the same blue so the two read as one
+    # highlight rather than two unrelated colors.
+    TRAVEL_TARGET_BG = (70, 130, 190)
+    TRAVEL_PATH_BG = (30, 55, 80)

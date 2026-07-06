@@ -15,6 +15,7 @@ from backrooms.actions import (
     ToggleInventoryAction,
     ToggleLightAction,
     ToggleLookModeAction,
+    TravelToAction,
     UseItemAction,
     WaitAction,
 )
@@ -118,3 +119,13 @@ class EventHandler(tcod.event.EventDispatch[Action]):
         if key in WAIT_KEYS:
             return WaitAction(self.actor)
         return None
+
+    def ev_mousebuttondown(self, event: tcod.event.MouseButtonDown) -> Action | None:
+        # event.position is only in tile coordinates once main.py has run the
+        # raw event through context.convert_event -- pixel coordinates alone
+        # can't be mapped to a map tile without knowing the tileset/window
+        # size, which this class has no access to.
+        if event.button != tcod.event.MouseButton.LEFT:
+            return None
+        x, y = event.integer_position
+        return TravelToAction(self.actor, x, y)

@@ -8,6 +8,8 @@ while actually lit and in FOV ("light").
 
 from __future__ import annotations
 
+from enum import IntFlag, auto
+
 import numpy as np
 
 from backrooms.constants import Color
@@ -20,11 +22,28 @@ graphic_dt = np.dtype(
     ]
 )
 
+
+class ZoneEffect(IntFlag):
+    """Passive per-turn effects a tile can apply to whoever's standing on
+    it -- one bitmask field on the tile struct instead of one bool field per
+    effect, so a future third effect (or fourth, ...) is a new member here
+    plus a system checking GameMap.has_zone_effect for it, not another
+    dtype field/new_tile kwarg/GameMap accessor to hand-wire through the
+    whole stack again."""
+
+    NONE = 0
+    # Sanity actively recovers here (see systems/sanity_system.py's
+    # SAFE_ZONE_RESTORE).
+    SAFE = auto()
+    # HP and hunger also recover here (see systems/rest_system.py).
+    INN = auto()
+
+
 tile_dt = np.dtype(
     [
         ("walkable", np.bool_),
         ("transparent", np.bool_),
-        ("is_safe_zone", np.bool_),
+        ("zone_effects", np.uint8),
         ("tile_id", "U20"),  # stable identifier for FEATURE_STEPPED_ON transition rules
         ("dark", graphic_dt),
         ("light", graphic_dt),
@@ -38,11 +57,11 @@ def new_tile(
     transparent: int,
     dark: tuple[int, tuple[int, int, int], tuple[int, int, int]],
     light: tuple[int, tuple[int, int, int], tuple[int, int, int]],
-    is_safe_zone: bool = False,
+    zone_effects: ZoneEffect = ZoneEffect.NONE,
     tile_id: str = "",
 ) -> np.ndarray:
     """Build a single tile_dt record. Helper so callers don't repeat the tuple shape."""
-    return np.array((walkable, transparent, is_safe_zone, tile_id, dark, light), dtype=tile_dt)
+    return np.array((walkable, transparent, int(zone_effects), tile_id, dark, light), dtype=tile_dt)
 
 
 SHROUD = np.array((ord(" "), Color.BLACK, Color.BLACK), dtype=graphic_dt)
@@ -123,13 +142,28 @@ SETTLEMENT_DOOR = new_tile(
 )
 
 # A settlement's floor -- warm/lived-in, and a safe zone (see
-# GameMap.is_safe_zone_at / sanity_system.SAFE_ZONE_RESTORE): sanity
+# GameMap.has_zone_effect / sanity_system.SAFE_ZONE_RESTORE): sanity
 # actively recovers here instead of just not draining.
 SETTLEMENT_FLOOR = new_tile(
     walkable=True,
     transparent=True,
-    is_safe_zone=True,
+    zone_effects=ZoneEffect.SAFE,
     dark=(ord(" "), Color.WHITE, Color.SETTLEMENT_FLOOR_DARK),
     light=(ord(" "), Color.WHITE, Color.SETTLEMENT_FLOOR_LIT),
     tile_id="settlement_floor",
+)
+
+# A small inn room within a settlement -- still ZoneEffect.SAFE (sanity keeps
+# recovering here same as the rest of the settlement) plus ZoneEffect.INN,
+# which also passively restores HP and hunger while standing on it (see
+# systems/rest_system.py). A warmer, cozier tone than the settlement's own
+# floor so it reads as a distinct little room within it, not just more of
+# the same safe zone.
+INN_FLOOR = new_tile(
+    walkable=True,
+    transparent=True,
+    zone_effects=ZoneEffect.SAFE | ZoneEffect.INN,
+    dark=(ord(" "), Color.WHITE, Color.INN_FLOOR_DARK),
+    light=(ord(" "), Color.WHITE, Color.INN_FLOOR_LIT),
+    tile_id="inn_floor",
 )

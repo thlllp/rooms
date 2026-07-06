@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from backrooms.world.level_registry import LEVEL_REGISTRY
+from backrooms.world.tile_types import ZoneEffect
 
 if TYPE_CHECKING:
     from backrooms.engine import Engine
@@ -65,7 +66,7 @@ def process_sanity(engine: "Engine") -> None:
     total_drain += _repeat_loop_drain(sanity)
     sanity.drain(total_drain)
 
-    if engine.game_map.is_safe_zone_at(player.x, player.y):
+    if engine.game_map.has_zone_effect(player.x, player.y, ZoneEffect.SAFE):
         sanity.restore(SAFE_ZONE_RESTORE)
 
     sanity.record_position(player.x, player.y)

@@ -26,6 +26,7 @@ TILE_LABELS = {
     "garage_floor": "Concrete Floor",
     "settlement_door": "Door",
     "settlement_floor": "Floor",
+    "inn_floor": "Inn Floor",
 }
 
 # Flavor text pools for look mode, keyed by tile_id. Several lines per kind
@@ -74,6 +75,11 @@ TILE_DESCRIPTIONS: dict[str, tuple[str, ...]] = {
         "Swept clean. Someone's been keeping this place up.",
         "Warm underfoot, somehow -- the first surface here that feels lived-in.",
         "Someone's laid out mismatched rugs to cover the worst of the floor.",
+    ),
+    "inn_floor": (
+        "A few threadbare bedrolls and a pot that's always warm.",
+        "Someone's turned this room into somewhere to actually rest.",
+        "It smells like food, faintly. You feel steadier just standing here.",
     ),
 }
 
@@ -218,6 +224,28 @@ def render_look_cursor(console: "tcod.console.Console", engine: "Engine") -> Non
     if 0 <= x < console.width and 0 <= y < console.height:
         console.rgb[x, y]["bg"] = Color.WARNING
         console.rgb[x, y]["fg"] = Color.BLACK
+
+
+def render_travel_path(console: "tcod.console.Console", engine: "Engine") -> None:
+    """While engine.traveling is set, tints the remaining route to
+    engine.travel_target (dim blue) and the destination tile itself
+    (brighter blue). Reads engine.travel_path -- refreshed once per tick by
+    systems.auto_explore.step_travel as it moves the player -- rather than
+    recomputing the route itself, so a full BFS doesn't run twice per tick
+    (once for movement, once again here for the preview). Only tints bg, so
+    entities/hazards drawn afterward still show their own glyph on top
+    undisturbed."""
+    path = engine.travel_path
+    if not path:
+        return
+
+    for x, y in path[:-1]:
+        if 0 <= x < console.width and 0 <= y < console.height:
+            console.rgb[x, y]["bg"] = Color.TRAVEL_PATH_BG
+
+    target_x, target_y = path[-1]
+    if 0 <= target_x < console.width and 0 <= target_y < console.height:
+        console.rgb[target_x, target_y]["bg"] = Color.TRAVEL_TARGET_BG
 
 
 def render_look_background(console: "tcod.console.Console", *, y: int, width: int) -> None:

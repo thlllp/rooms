@@ -161,6 +161,25 @@ class AutoExploreAction(Action):
         engine.start_auto_explore()
 
 
+class TravelToAction(Action):
+    """Click-to-travel: main.py's loop then calls engine.step_travel() once
+    per real-time tick (rate-limited there) while engine.traveling is set --
+    same shape as AutoExploreAction, just pathed at (x, y) specifically
+    instead of the nearest unexplored frontier (see
+    systems.auto_explore.find_step_toward). costs_turn=False for the same
+    reason as AutoExploreAction: each step taken advances a turn on its own."""
+
+    costs_turn = False
+
+    def __init__(self, entity: "Entity", x: int, y: int) -> None:
+        super().__init__(entity)
+        self.x = x
+        self.y = y
+
+    def perform(self, engine: "Engine") -> None:
+        engine.start_travel((self.x, self.y))
+
+
 class UseItemAction(Action):
     """`slot_index` indexes a combined list: held inventory items first, then
     currently equipped items -- exactly the order render_inventory_screen

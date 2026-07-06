@@ -41,6 +41,7 @@ class LevelKind(Enum):
 
     INDOOR = auto()  # cramped cubicle maze -- level_0/level_1's original feel
     SPACIOUS = auto()  # open, cavernous, fills the map -- level_2's feel
+    SETTLEMENT = auto()  # tiny, enclosed safe zone -- a narrower room-size range and far fewer of them than INDOOR
 
 
 class LevelStability(Enum):
@@ -71,6 +72,11 @@ class LevelStyle:
     # Room placement tries much harder to pack the available space full
     # instead of leaving the usual gaps -- see generator_office.py.
     fill_screen: bool
+    # Caps how many rooms generate_office_level places, overriding the
+    # module's own MAX_ROOMS/MAX_ROOMS_FILL_SCREEN default for every level of
+    # this kind. None (the default) leaves that fallback alone.
+    # LevelDefinition.max_rooms, if set, wins over this for a one-off level.
+    max_rooms: int | None = None
 
 
 LEVEL_STYLES: dict[LevelKind, LevelStyle] = {
@@ -79,6 +85,9 @@ LEVEL_STYLES: dict[LevelKind, LevelStyle] = {
     ),
     LevelKind.SPACIOUS: LevelStyle(
         room_min_size=16, room_max_size=28, column_spacing=5, uses_edge_exit=True, fill_screen=True
+    ),
+    LevelKind.SETTLEMENT: LevelStyle(
+        room_min_size=5, room_max_size=8, column_spacing=None, uses_edge_exit=False, fill_screen=False, max_rooms=3
     ),
 }
 
@@ -203,22 +212,42 @@ class LevelDefinition:
     isolation: bool = True
     # Chance generate_office_level embeds a settlement door in a room wall,
     # in addition to (and independent of) the level's normal exit feature --
-    # a settlement is a separate small sublevel (LevelDefinition.max_rooms,
+    # a settlement is a separate small sublevel (LevelKind.SETTLEMENT,
     # TriggerKind.FEATURE_STEPPED_ON on "settlement_door"), not more of the
     # level you're already on. 0.0 (the default) means this level never gets
     # one. See generator_office._place_settlement_door.
     settlement_door_chance: float = 0.0
     # Caps how many rooms generate_office_level places, overriding
-    # LEVEL_STYLES[kind]'s normal MAX_ROOMS/MAX_ROOMS_FILL_SCREEN cap --
-    # None (the default) leaves the style's own cap untouched. Lets one
-    # INDOOR level (a settlement) be deliberately small/enclosed without
-    # changing every other INDOOR level sharing that same LevelStyle.
+    # LEVEL_STYLES[kind]'s own max_rooms/MAX_ROOMS/MAX_ROOMS_FILL_SCREEN cap --
+    # None (the default) leaves the style's own cap untouched. An escape
+    # hatch for one single level to deviate from every other level sharing
+    # its LevelStyle, without needing a whole new LevelKind.
     max_rooms: int | None = None
     # Zero-arg Entity factory placed near a settlement door if one was
     # generated (see settlement_door_chance) -- engine.py stays
     # content-agnostic (it just calls this if set) while the actual Sign
     # entity is defined as regular content in data/registrations.py.
     sign_factory: Callable[[], "Entity"] | None = None
+    # If set, generate_office_level reskins one room's interior with this
+    # tile instead of the level's own floor_tile -- a small "inn" rest area
+    # (see systems/rest_system.py, which passively heals HP/hunger on
+    # tile_types.INN_FLOOR) within a level that's otherwise built like any
+    # other. None (the default) means this level never gets one. See
+    # generator_office._place_inn.
+    inn_floor_tile: np.ndarray | None = None
+
+    def feature_trigger_tile_ids(self) -> frozenset[str]:
+        """Every tile_id that would fire a FEATURE_STEPPED_ON transition on
+        this level -- used by Engine.load_level to avoid ever spawning the
+        player back onto one of these (that tile's whole purpose is to fire
+        again the instant something stands on it, so restoring a saved
+        position onto it would immediately re-trigger the transition on the
+        player's very next action)."""
+        return frozenset(
+            rule.feature_tile_id
+            for rule in self.transition_rules
+            if rule.trigger is TriggerKind.FEATURE_STEPPED_ON and rule.feature_tile_id is not None
+        )
 
 
 @dataclass

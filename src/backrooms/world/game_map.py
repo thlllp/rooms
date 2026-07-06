@@ -60,8 +60,8 @@ class GameMap:
             return None
         return str(self.tiles["tile_id"][x, y])
 
-    def is_safe_zone_at(self, x: int, y: int) -> bool:
-        return self.in_bounds(x, y) and bool(self.tiles["is_safe_zone"][x, y])
+    def has_zone_effect(self, x: int, y: int, effect: tile_types.ZoneEffect) -> bool:
+        return self.in_bounds(x, y) and bool(self.tiles["zone_effects"][x, y] & effect)
 
     def get_blocking_entity_at(self, x: int, y: int) -> "Entity | None":
         for entity in self.entities:

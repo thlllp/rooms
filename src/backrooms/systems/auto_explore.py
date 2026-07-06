@@ -1,20 +1,26 @@
-"""Frontier-BFS pathfinding for auto-explore.
+"""Frontier-BFS pathfinding for auto-explore, plus click-to-travel to a
+specific tile using that same BFS core.
 
 A "frontier" tile is any walkable tile bordering an unexplored one -- heading
 toward the nearest one and repeating is a standard, simple way to cover a
-level without the player manually retracing already-seen ground.
+level without the player manually retracing already-seen ground. Travel-to-
+point instead heads for one exact destination tile, regardless of whether
+it (or anything along the way) has been explored yet -- same walkability/
+occupancy rules, just a different stopping condition.
 
-`step()` performs exactly one such move and is meant to be called once per
-real-time tick from main.py's loop while `engine.auto_exploring` is set (see
-actions.AutoExploreAction, which just flips that flag on) -- rate-limited
-there rather than run in a tight loop, so a single keypress animates
-step-by-step instead of resolving instantly.
+`step()`/`step_travel()` each perform exactly one such move and are meant to
+be called once per real-time tick from main.py's loop (via
+Engine.step_continuing_mode) while engine.auto_exploring/engine.traveling is
+set (see actions.AutoExploreAction/TravelToAction, which just call
+Engine.start_auto_explore/start_travel -- see engine.py's ContinuingMode) --
+rate-limited there rather than run in a tight loop, so a single keypress or
+click animates step-by-step instead of resolving instantly.
 """
 
 from __future__ import annotations
 
 from collections import deque
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 from backrooms.constants import Color
 
@@ -22,10 +28,11 @@ if TYPE_CHECKING:
     from backrooms.engine import Engine
     from backrooms.world.game_map import GameMap
 
-# Safety cap on total steps per auto-explore run, in case a pathfinding edge
-# case ever oscillates -- generous relative to a full map's walkable-tile
-# count (~2000-4000 on the current MAP_WIDTH/MAP_HEIGHT) so it never cuts a
-# real exploration short. The player can also just press any key to stop.
+# Safety cap on total steps per auto-explore/travel run, in case a
+# pathfinding edge case ever oscillates -- generous relative to a full map's
+# walkable-tile count (~2000-4000 on the current MAP_WIDTH/MAP_HEIGHT) so it
+# never cuts a real run short. The player can also just press any key (or
+# click a new destination) to stop.
 MAX_STEPS = 5000
 
 
@@ -36,21 +43,27 @@ def _borders_unexplored(game_map: "GameMap", x: int, y: int) -> bool:
     return False
 
 
-def find_step_toward_frontier(game_map: "GameMap", start: tuple[int, int]) -> tuple[int, int] | None:
-    """BFS from `start` over walkable, unoccupied tiles. Returns the (dx, dy)
-    of the first step toward the nearest tile bordering unexplored ground,
-    or None if nothing reachable is left to explore."""
+def _bfs_path(
+    game_map: "GameMap", start: tuple[int, int], is_goal: Callable[[tuple[int, int]], bool]
+) -> list[tuple[int, int]] | None:
+    """Shared BFS core for find_step_toward_frontier/find_step_toward/
+    find_path_to: walks outward from `start` over walkable, unoccupied tiles
+    until `is_goal` matches some reachable tile, then walks that tile's
+    parent chain back into the full route there (excluding `start`, ending
+    with the matched tile). None if no reachable tile (other than `start`
+    itself, which never counts) satisfies `is_goal`."""
     visited = {start}
     parent: dict[tuple[int, int], tuple[int, int]] = {}
     queue: deque[tuple[int, int]] = deque([start])
 
     while queue:
         current = queue.popleft()
-        if current != start and _borders_unexplored(game_map, *current):
-            step = current
-            while parent[step] != start:
-                step = parent[step]
-            return step[0] - start[0], step[1] - start[1]
+        if current != start and is_goal(current):
+            path = [current]
+            while parent[path[-1]] != start:
+                path.append(parent[path[-1]])
+            path.reverse()
+            return path
 
         cx, cy = current
         for neighbor in ((cx + 1, cy), (cx - 1, cy), (cx, cy + 1), (cx, cy - 1)):
@@ -66,6 +79,32 @@ def find_step_toward_frontier(game_map: "GameMap", start: tuple[int, int]) -> tu
     return None
 
 
+def find_step_toward_frontier(game_map: "GameMap", start: tuple[int, int]) -> tuple[int, int] | None:
+    """Returns the (dx, dy) of the first step toward the nearest tile
+    bordering unexplored ground, or None if nothing reachable is left to
+    explore."""
+    path = _bfs_path(game_map, start, lambda pos: _borders_unexplored(game_map, *pos))
+    return None if path is None else (path[0][0] - start[0], path[0][1] - start[1])
+
+
+def find_step_toward(game_map: "GameMap", start: tuple[int, int], target: tuple[int, int]) -> tuple[int, int] | None:
+    """Returns the (dx, dy) of the first step toward `target` specifically
+    (ignoring explored/visible state entirely, same as find_step_toward_frontier
+    already does), or None if `target` is unreachable or is `start` itself."""
+    path = _bfs_path(game_map, start, lambda pos: pos == target)
+    return None if path is None else (path[0][0] - start[0], path[0][1] - start[1])
+
+
+def find_path_to(
+    game_map: "GameMap", start: tuple[int, int], target: tuple[int, int]
+) -> list[tuple[int, int]] | None:
+    """The full route (excluding `start`, ending with `target`) find_step_toward
+    would walk one step at a time -- used to preview the upcoming route while
+    traveling (see rendering/ui.render_travel_path), not for movement itself.
+    None if `target` is unreachable or is `start` itself."""
+    return _bfs_path(game_map, start, lambda pos: pos == target)
+
+
 def hostile_visible(engine: "Engine") -> bool:
     """True if any AI-driven entity is currently in the player's FOV --
     auto-explore stops rather than walking toward or past something
@@ -76,27 +115,27 @@ def hostile_visible(engine: "Engine") -> bool:
 
 
 def step(engine: "Engine") -> None:
-    """One auto-explore move. Clears engine.auto_exploring (with a log
-    message) the moment it should stop; otherwise moves the player one tile
-    toward the nearest frontier and advances a turn, same as a manual move."""
-    engine.auto_explore_steps += 1
+    """One auto-explore move. Stops the continuing mode (with a log message)
+    the moment it should stop; otherwise moves the player one tile toward
+    the nearest frontier and advances a turn, same as a manual move."""
+    engine.continuing_steps += 1
     if engine.game_over:
-        engine.auto_exploring = False
+        engine.stop_continuing_mode()
         return
-    if engine.auto_explore_steps > MAX_STEPS:
+    if engine.continuing_steps > MAX_STEPS:
         engine.message_log.add_message("Auto-explore stops (safety limit reached).", color=Color.GREY)
-        engine.auto_exploring = False
+        engine.stop_continuing_mode()
         return
     if hostile_visible(engine):
         engine.message_log.add_message("Something's here -- you stop exploring.", color=Color.WARNING)
-        engine.auto_exploring = False
+        engine.stop_continuing_mode()
         return
 
     player = engine.player
     move = find_step_toward_frontier(engine.game_map, (player.x, player.y))
     if move is None:
         engine.message_log.add_message("Nothing left to explore here.", color=Color.GREY)
-        engine.auto_exploring = False
+        engine.stop_continuing_mode()
         return
 
     dx, dy = move
@@ -107,8 +146,56 @@ def step(engine: "Engine") -> None:
     # The frontier BFS treats stairs/doors/map edges as ordinary walkable
     # tiles, so it can walk the player straight through one -- stop rather
     # than silently continuing to explore a level the player never chose to
-    # enter (also resets auto_explore_steps for that fresh level, via
+    # enter (also resets continuing_steps for that fresh level, via
     # load_level -- see Engine.load_level).
     if engine.current_level_id != level_before:
         engine.message_log.add_message("Somewhere new now -- you stop exploring.", color=Color.GREY)
-        engine.auto_exploring = False
+        engine.stop_continuing_mode()
+
+
+def step_travel(engine: "Engine") -> None:
+    """One travel-to-point move -- same step-by-step, interruptible shape as
+    step(), but heading toward engine.travel_target instead of the nearest
+    unexplored frontier, and consuming/refreshing engine.travel_path rather
+    than pathfinding fresh from scratch (rendering/ui.py's render_travel_path
+    reads that same cached route to preview it, so this is the only BFS run
+    per tick, not two)."""
+    engine.continuing_steps += 1
+    if engine.game_over:
+        engine.stop_continuing_mode()
+        return
+    if engine.continuing_steps > MAX_STEPS:
+        engine.message_log.add_message("Travel stops (safety limit reached).", color=Color.GREY)
+        engine.stop_continuing_mode()
+        return
+    if hostile_visible(engine):
+        engine.message_log.add_message("Something's here -- you stop traveling.", color=Color.WARNING)
+        engine.stop_continuing_mode()
+        return
+
+    player = engine.player
+    if (player.x, player.y) == engine.travel_target:
+        engine.stop_continuing_mode()
+        return
+
+    path = engine.travel_path
+    if not path:
+        engine.message_log.add_message("Can't find a way there.", color=Color.GREY)
+        engine.stop_continuing_mode()
+        return
+
+    dx, dy = path[0][0] - player.x, path[0][1] - player.y
+    level_before = engine.current_level_id
+    player.move(dx, dy)
+    engine.advance_turn()
+
+    # Same reasoning as step()'s own check: don't keep traveling into a level
+    # the player never chose to enter just because the path crossed its exit.
+    if engine.current_level_id != level_before:
+        engine.message_log.add_message("Somewhere new now -- you stop traveling.", color=Color.GREY)
+        engine.stop_continuing_mode()
+        return
+
+    # Refreshed from the player's new position for the next tick's render
+    # (preview) and step (movement) to share -- see the docstring above.
+    engine.travel_path = find_path_to(engine.game_map, (player.x, player.y), engine.travel_target)

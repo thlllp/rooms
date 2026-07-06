@@ -409,15 +409,23 @@ LEVEL_2_GARAGE = register(
 )
 
 # A small, enclosed, safe sublevel behind one of level_2_garage's settlement
-# doors -- INDOOR (small rooms) rather than SPACIOUS, and max_rooms caps it
-# to just a handful so it actually reads as "one small area" rather than
-# another sprawling maze. floor_tile=SETTLEMENT_FLOOR marks the whole thing
-# a safe zone (sanity actively recovers, see sanity_system.SAFE_ZONE_RESTORE).
+# doors -- SETTLEMENT kind (see LEVEL_STYLES) bakes in even smaller rooms and
+# a lower room cap than INDOOR, so it reads as "one small area" rather than
+# another sprawling maze. wall_tile=GARAGE_WALL reuses level_2_garage's own
+# reskin (this is a room off the garage, not the plain office wallpaper the
+# generator otherwise defaults to). floor_tile=SETTLEMENT_FLOOR still marks
+# the whole thing a safe zone (sanity actively recovers, see
+# sanity_system.SAFE_ZONE_RESTORE) -- that's a functional flag, not just a
+# reskin, so it stays distinct from the garage's own floor.
 # STABLE with no edge-exit means every visit -- via any garage zone's door --
 # lands on the exact same cached zone (0,0): there's one persistent
 # settlement, not a new one per door (see Engine._load_stable_zone's
-# fallback for a STABLE level that never sets pending_edge_wall). Leaving is
-# a normal door back to level_2_garage's own canonical zone.
+# fallback for a STABLE level that never sets pending_edge_wall). Leaving
+# returns the player to the exact garage zone and tile they left from (see
+# Engine._stable_return), not just some canonical spot.
+# inn_floor_tile carves one room out as a small inn -- HP and hunger
+# passively recover there too, on top of the sanity recovery the rest of the
+# settlement already gives (see systems/rest_system.py).
 LEVEL_2_SETTLEMENT = register(
     LevelDefinition(
         id="level_2_settlement",
@@ -425,10 +433,11 @@ LEVEL_2_SETTLEMENT = register(
         generator=generate_office_level,
         ambient_sanity_drain=0.0,
         is_well_lit=True,
+        wall_tile=tile_types.GARAGE_WALL,
         floor_tile=tile_types.SETTLEMENT_FLOOR,
-        kind=LevelKind.INDOOR,
+        inn_floor_tile=tile_types.INN_FLOOR,
+        kind=LevelKind.SETTLEMENT,
         stability=LevelStability.STABLE,
-        max_rooms=4,
         door_exit_chance=1.0,
         # The one place isolation is off and colonists actually gather --
         # see _spawn_colonist/systems/npc_social.py.

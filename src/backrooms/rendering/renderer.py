@@ -63,6 +63,8 @@ def render_all(console: "tcod.console.Console", engine: "Engine") -> None:
         return
 
     render_map(console, engine)
+    if engine.traveling:
+        ui.render_travel_path(console, engine)
     render_hazard_footprints(console, engine)
     render_entities(console, engine)
     apply_visual_distortion(console, engine)

@@ -141,7 +141,7 @@ def main() -> None:
             render_all(console, engine)
             context.present(console)
 
-            if engine.auto_exploring:
+            if engine.auto_exploring or engine.traveling:
                 # tcod.event.wait's own timeout blocks up to one step
                 # interval and returns early the instant a real event
                 # arrives -- no manual clock/sleep bookkeeping needed, and no
@@ -150,21 +150,33 @@ def main() -> None:
                 # is still actually performed via _perform_if_allowed) --
                 # e.g. a stray number key outside the inventory screen is a
                 # no-op either way and shouldn't silently cancel the run.
+                # TravelToAction is deliberately still performed even when
+                # it interrupts itself: clicking a new tile mid-run should
+                # redirect travel there, not just cancel it. AutoExploreAction
+                # is the opposite -- pressing Home again while auto-exploring
+                # should stop the run, not immediately restart it -- but
+                # only when auto-explore is what's actually being
+                # interrupted; pressing Home while traveling should still
+                # switch modes in one press; `was_auto_exploring` (captured
+                # before stop_continuing_mode() below) is what tells those
+                # two cases apart.
+                was_auto_exploring = engine.auto_exploring
                 for event in tcod.event.wait(AUTO_EXPLORE_STEP_INTERVAL):
+                    if isinstance(event, tcod.event.MouseButtonDown):
+                        event = context.convert_event(event)
                     action = event_handler.dispatch(event)
                     if action is None or not _is_action_allowed(engine, action):
                         continue
-                    engine.auto_exploring = False
-                    # AutoExploreAction itself just toggles the mode back on
-                    # -- pressing Home again should stop the run, not
-                    # immediately restart it.
-                    if not isinstance(action, AutoExploreAction):
+                    engine.stop_continuing_mode()
+                    if not (isinstance(action, AutoExploreAction) and was_auto_exploring):
                         _perform_if_allowed(engine, action)
-                if engine.auto_exploring:
-                    engine.step_auto_explore()
+                if engine.auto_exploring or engine.traveling:
+                    engine.step_continuing_mode()
                 continue
 
             for event in tcod.event.wait():
+                if isinstance(event, tcod.event.MouseButtonDown):
+                    event = context.convert_event(event)
                 action = event_handler.dispatch(event)
                 if action is None:
                     continue

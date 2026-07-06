@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import random
+from enum import Enum
 
 from backrooms.constants import DEFAULT_FOV_RADIUS, MAP_HEIGHT, MAP_WIDTH, UNLIT_FOV_RADIUS, Color
 from backrooms.entity.entity import Entity
@@ -12,6 +13,7 @@ from backrooms.systems.experience_system import award_xp
 from backrooms.systems.hallucination_system import process_hallucinations
 from backrooms.systems.hazard_system import process_hazards
 from backrooms.systems.npc_social import process_npc_social
+from backrooms.systems.rest_system import process_rest
 from backrooms.systems.sanity_system import process_sanity
 from backrooms.systems.transition_system import evaluate_transitions
 from backrooms.world.game_map import GameMap
@@ -36,6 +38,30 @@ MODAL_FLAGS = ("show_character_screen", "show_inventory", "look_mode")
 # by LevelStability.STABLE levels; see Engine._load_stable_zone.
 _WALL_DELTA = {"left": (-1, 0), "right": (1, 0), "top": (0, -1), "bottom": (0, 1)}
 _OPPOSITE_WALL = {"left": "right", "right": "left", "top": "bottom", "bottom": "top"}
+
+
+class ContinuingMode(Enum):
+    """A "continuing mode" is one main.py drives step-by-step, once per
+    real-time tick, until it stops itself or any other action interrupts it
+    -- auto-explore and click-to-travel are the two instances today (see
+    Engine.start_auto_explore/start_travel). Engine.continuing_mode holds at
+    most one of these at a time (structurally -- there's exactly one field,
+    not one bool per mode -- so a future third mode can't accidentally end
+    up simultaneously active with another one the way two independent bools
+    could)."""
+
+    AUTO_EXPLORE = "auto_explore"
+    TRAVEL = "travel"
+
+
+# Which systems/auto_explore function performs one step of each
+# ContinuingMode -- Engine.step_continuing_mode's dispatch table, so main.py
+# doesn't need its own per-mode if/elif (and adding a third mode only means
+# adding one entry here, not another branch there).
+_CONTINUING_MODE_STEPPERS = {
+    ContinuingMode.AUTO_EXPLORE: auto_explore.step,
+    ContinuingMode.TRAVEL: auto_explore.step_travel,
+}
 
 
 class MessageLog:
@@ -85,11 +111,21 @@ class Engine:
         # "current" for each such level_id. See _load_stable_zone.
         self._zone_maps: dict[tuple[str, int, int], GameMap] = {}
         self._zone_position: dict[str, tuple[int, int]] = {}
+        # Recorded the instant the player leaves a STABLE level for a
+        # different one (e.g. through a settlement door) -- the zone and
+        # exact tile they left from, so that stepping back into that same
+        # level_id from outside its zone grid (a sub-level's own exit, not an
+        # edge crossing) lands them back exactly where they left rather than
+        # always resetting to the canonical (0, 0) zone. Consumed (and
+        # popped) by the very next _load_stable_zone call for that level_id.
+        # See load_level/_load_stable_zone.
+        self._stable_return: dict[str, tuple[tuple[int, int], tuple[int, int]]] = {}
         # Set by actions.MovementAction._handle_edge the instant the player
         # walks off a wall on a uses_edge_exit level; consumed (and cleared)
         # by the very next load_level() call to pick the right neighboring
         # zone. None means "entering from outside the zone grid entirely"
-        # (a different level's door, or the very first visit).
+        # (a different level's door, a sub-level's own return trip -- see
+        # _stable_return -- or the very first visit).
         self.pending_edge_wall: str | None = None
         # Level-scoped state: reset on every load_level() call (initial boot
         # or a noclip transition), never carried between levels.
@@ -98,12 +134,28 @@ class Engine:
         self.game_over = False
         self._reset_modal_flags()
         self.look_cursor: tuple[int, int] = (0, 0)
-        # Not a MODAL_FLAGS entry -- auto-explore isn't a UI screen with an
-        # allowed-actions whitelist, it's a continuing mode main.py drives
-        # step-by-step (see step_auto_explore) and any keypress interrupts.
-        self.auto_exploring = False
-        self.auto_explore_steps = 0
+        # Not a MODAL_FLAGS entry -- a continuing mode isn't a UI screen with
+        # an allowed-actions whitelist, it's something main.py drives
+        # step-by-step (see step_continuing_mode) and any keypress
+        # interrupts. See ContinuingMode for what "continuing mode" means
+        # and why this is one field instead of one bool per mode.
+        self._continuing_mode: ContinuingMode | None = None
+        self.continuing_steps = 0
+        # Click-to-travel's own target/route -- travel_path is the full
+        # remaining BFS route to travel_target, refreshed once per step by
+        # step_travel and reused by rendering (see rendering/ui.py's
+        # render_travel_path) instead of that also recomputing it fresh.
+        self.travel_target: tuple[int, int] | None = None
+        self.travel_path: list[tuple[int, int]] | None = None
         self.load_level(start_level_id if start_level_id is not None else get_entry_level().id)
+
+    @property
+    def auto_exploring(self) -> bool:
+        return self._continuing_mode is ContinuingMode.AUTO_EXPLORE
+
+    @property
+    def traveling(self) -> bool:
+        return self._continuing_mode is ContinuingMode.TRAVEL
 
     def _reset_modal_flags(self) -> None:
         for flag in MODAL_FLAGS:
@@ -122,6 +174,18 @@ class Engine:
         if hasattr(self, "game_map"):
             self.game_map.entities.discard(self.player)
 
+        # Leaving a STABLE level for a genuinely different one -- remember
+        # exactly where, so _load_stable_zone can restore it if/when the
+        # player comes back to this same level_id from outside its zone grid
+        # (see _stable_return).
+        if self.current_level_id and not same_level:
+            outgoing_def = LEVEL_REGISTRY[self.current_level_id]
+            if outgoing_def.stability is LevelStability.STABLE:
+                self._stable_return[self.current_level_id] = (
+                    self._zone_position.get(self.current_level_id, (0, 0)),
+                    self._non_trigger_position(outgoing_def, self.game_map, self.player.x, self.player.y),
+                )
+
         level_def = LEVEL_REGISTRY[level_id]
         if level_def.stability is LevelStability.STABLE:
             game_map, spawn_at = self._load_stable_zone(level_id, level_def, same_level)
@@ -135,7 +199,7 @@ class Engine:
         self.current_level_id = level_id
         self.turns_in_level = 0
         self.event_flags = set()
-        self.auto_explore_steps = 0
+        self.continuing_steps = 0
         self._reset_modal_flags()
         self.player.place(*spawn_at)
         game_map.entities.add(self.player)
@@ -162,6 +226,29 @@ class Engine:
 
         return game_map
 
+    def _non_trigger_position(
+        self, level_def: LevelDefinition, game_map: GameMap, x: int, y: int
+    ) -> tuple[int, int]:
+        """(x, y) is where the player is standing right as they leave this
+        level -- for a FEATURE_STEPPED_ON transition (a settlement door, a
+        stairs tile, ...) that's necessarily the trigger tile itself, since
+        that's what just fired the transition. Spawning the player back onto
+        that exact tile later (see _stable_return/_load_stable_zone) would
+        immediately re-fire the same transition on their very next action,
+        since FEATURE_STEPPED_ON checks the tile currently under the player
+        every turn, not just the turn they first step onto it -- so this
+        nudges onto an adjacent walkable, non-trigger tile instead whenever
+        (x, y) is itself one. Falls back to (x, y) unchanged if no such
+        neighbor exists (a fully enclosed 1-tile trigger cell), rather than
+        picking an invalid tile."""
+        trigger_ids = level_def.feature_trigger_tile_ids()
+        if game_map.tile_id_at(x, y) not in trigger_ids:
+            return x, y
+        for nx, ny in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
+            if game_map.is_walkable(nx, ny) and game_map.tile_id_at(nx, ny) not in trigger_ids:
+                return nx, ny
+        return x, y
+
     def _load_stable_zone(
         self, level_id: str, level_def: LevelDefinition, same_level: bool
     ) -> tuple[GameMap, tuple[int, int]]:
@@ -171,9 +258,12 @@ class Engine:
         retracing your steps back the way you came returns to the SAME
         already-generated zone (same remaining entities, same explored
         state); a wall you haven't crossed before generates a brand new
-        one. Entering from outside the grid entirely (a different level's
-        door, or the very first visit) always lands on the canonical
-        (0, 0) zone.
+        one. Entering from outside the grid entirely lands on wherever the
+        player last left this level_id from (see _stable_return) -- the
+        exact zone and tile, so a sub-level's own door drops you back where
+        you started rather than someplace else already explored -- or, if
+        this level_id has never been left before, the canonical (0, 0) zone
+        (the very first visit).
 
         Bouncing between already-cached zones doesn't touch
         level_repeat_streak at all -- no new content was generated, so it
@@ -182,11 +272,15 @@ class Engine:
         fresh from a different level (even onto an already-cached zone)
         resets it -- otherwise a later real generation would inherit a
         streak built entirely out of idle back-and-forth navigation."""
+        return_position = None
         if self.pending_edge_wall is not None and same_level:
             dx, dy = _WALL_DELTA[self.pending_edge_wall]
             prev_zone = self._zone_position.get(level_id, (0, 0))
             zone = (prev_zone[0] + dx, prev_zone[1] + dy)
             entry_wall = _OPPOSITE_WALL[self.pending_edge_wall]
+        elif level_id in self._stable_return:
+            zone, return_position = self._stable_return.pop(level_id)
+            entry_wall = None
         else:
             zone = (0, 0)
             entry_wall = None
@@ -204,6 +298,8 @@ class Engine:
 
         if entry_wall is not None and entry_wall in game_map.edge_entry_points:
             spawn_at = game_map.edge_entry_points[entry_wall]
+        elif return_position is not None:
+            spawn_at = return_position
         else:
             spawn_at = game_map.spawn_point
         return game_map, spawn_at
@@ -235,11 +331,28 @@ class Engine:
         self.game_map.compute_fov((self.player.x, self.player.y), radius=radius)
 
     def start_auto_explore(self) -> None:
-        self.auto_exploring = True
-        self.auto_explore_steps = 0
+        self._continuing_mode = ContinuingMode.AUTO_EXPLORE
+        self.continuing_steps = 0
 
     def step_auto_explore(self) -> None:
         auto_explore.step(self)
+
+    def start_travel(self, target: tuple[int, int]) -> None:
+        self._continuing_mode = ContinuingMode.TRAVEL
+        self.travel_target = target
+        self.travel_path = auto_explore.find_path_to(self.game_map, (self.player.x, self.player.y), target)
+        self.continuing_steps = 0
+
+    def step_travel(self) -> None:
+        auto_explore.step_travel(self)
+
+    def stop_continuing_mode(self) -> None:
+        self._continuing_mode = None
+
+    def step_continuing_mode(self) -> None:
+        stepper = _CONTINUING_MODE_STEPPERS.get(self._continuing_mode)
+        if stepper is not None:
+            stepper(self)
 
     def advance_turn(self) -> None:
         """The per-turn pipeline, run once after every dispatched player action."""
@@ -251,6 +364,7 @@ class Engine:
         if self.game_over:
             return
         process_sanity(self)
+        process_rest(self)
         process_hallucinations(self)
         process_npc_social(self)
         if not evaluate_transitions(self):
