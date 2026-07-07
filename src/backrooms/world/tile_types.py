@@ -37,6 +37,10 @@ class ZoneEffect(IntFlag):
     SAFE = auto()
     # HP and hunger also recover here (see systems/rest_system.py).
     INN = auto()
+    # Contaminated standing water -- each turn spent on it risks contracting
+    # the Hydrolitis Plague (see systems/disease_system.py). Carried by
+    # FLOODED_FLOOR, which Level 1.11 scatters over its damp base floor.
+    CONTAMINATED = auto()
 
 
 tile_dt = np.dtype(
@@ -223,8 +227,10 @@ COLD_FLOOR = new_tile(
     tile_id="cold_floor",
 )
 
-# Level 1.11's "Water Damage" reskin of WALL/FLOOR -- mold-stained walls and
-# murky standing water.
+# Level 1.11's "Water Damage" reskin of WALL/FLOOR. The base floor is DAMP
+# (walkable, dry-ish, no effect); FLOODED_FLOOR is the actual standing water,
+# scattered in patches over it (see LevelDefinition.scatter_floor_tile) and
+# carrying ZoneEffect.CONTAMINATED so stepping in it risks the plague.
 FLOODED_WALL = new_tile(
     walkable=False,
     transparent=False,
@@ -233,10 +239,19 @@ FLOODED_WALL = new_tile(
     tile_id="flooded_wall",
 )
 
+DAMP_FLOOR = new_tile(
+    walkable=True,
+    transparent=True,
+    dark=(ord(" "), Color.WHITE, Color.DAMP_FLOOR_DARK),
+    light=(ord(" "), Color.WHITE, Color.DAMP_FLOOR_LIT),
+    tile_id="damp_floor",
+)
+
 FLOODED_FLOOR = new_tile(
     walkable=True,
     transparent=True,
     dark=(ord(" "), Color.WHITE, Color.FLOODED_FLOOR_DARK),
     light=(ord(" "), Color.WHITE, Color.FLOODED_FLOOR_LIT),
+    zone_effects=ZoneEffect.CONTAMINATED,
     tile_id="flooded_floor",
 )

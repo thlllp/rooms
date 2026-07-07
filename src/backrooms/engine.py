@@ -9,6 +9,7 @@ from backrooms.procgen.spawner import random_walkable_tile_near, spawn_from_tabl
 from backrooms.systems import auto_explore
 from backrooms.systems.ai_system import process_ai
 from backrooms.systems.dev_tools import log_level_overview
+from backrooms.systems.disease_system import process_diseases
 from backrooms.systems.experience_system import award_xp
 from backrooms.systems.hallucination_system import process_hallucinations
 from backrooms.systems.hazard_system import process_hazards
@@ -379,6 +380,7 @@ class Engine:
             return
         process_sanity(self)
         process_rest(self)
+        process_diseases(self)
         process_hallucinations(self)
         process_npc_social(self)
         if not evaluate_transitions(self):

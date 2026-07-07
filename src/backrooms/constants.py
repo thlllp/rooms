@@ -86,10 +86,12 @@ class Color:
     COLD_FLOOR_DARK = (26, 34, 42)
     COLD_FLOOR_LIT = (160, 185, 205)
 
-    # Level 1.11's "Water Damage" look -- mold-stained walls and murky standing
-    # water; the office palette gone damp and green-black.
+    # Level 1.11's "Water Damage" look -- mold-stained walls, a damp (dry-ish)
+    # base floor, and murky teal standing water pooled in patches over it.
     FLOODED_WALL_DARK = (18, 26, 22)
     FLOODED_WALL_LIT = (72, 92, 78)
+    DAMP_FLOOR_DARK = (20, 22, 18)
+    DAMP_FLOOR_LIT = (95, 92, 74)
     FLOODED_FLOOR_DARK = (14, 24, 28)
     FLOODED_FLOOR_LIT = (55, 90, 100)
 

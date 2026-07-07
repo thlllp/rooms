@@ -459,6 +459,24 @@ def _place_exit_hallway(game_map: GameMap, rng: "random.Random", floor_tile: np.
     game_map.exit_hallway_position = terminals[wall]
 
 
+def _scatter_floor(
+    game_map: GameMap, rng: "random.Random", base_floor_tile: np.ndarray, scatter_tile: np.ndarray, *, chance: float
+) -> None:
+    """Converts each base-floor tile to `scatter_tile` with `chance` probability
+    -- Level 1.11 pooling patches of contaminated water over its damp floor
+    (see LevelDefinition.scatter_floor_tile). Only tiles still showing the base
+    floor's own tile_id are eligible, so stairs/door features, reskinned inn
+    rooms, and any other special floor are never overwritten; the spawn tile is
+    skipped too so the player never starts standing in the scatter."""
+    base_id = str(base_floor_tile["tile_id"])
+    for x in range(game_map.width):
+        for y in range(game_map.height):
+            if (x, y) == game_map.spawn_point:
+                continue
+            if game_map.tile_id_at(x, y) == base_id and rng.random() < chance:
+                game_map.tiles[x, y] = scatter_tile
+
+
 def generate_office_level(ctx: "GenerationContext") -> GameMap:
     # Reskin knob plus the level's structural "kind", read from the registry
     # entry driving this generation -- ctx.level_def is None only in
@@ -474,6 +492,8 @@ def generate_office_level(ctx: "GenerationContext") -> GameMap:
         max_rooms_override = ctx.level_def.max_rooms
         inn_floor_tile = ctx.level_def.inn_floor_tile
         exit_hallway_chance = ctx.level_def.exit_hallway_chance
+        scatter_floor_tile = ctx.level_def.scatter_floor_tile
+        scatter_floor_chance = ctx.level_def.scatter_floor_chance
     else:
         door_chance = 0.0
         settlement_door_chance = 0.0
@@ -483,6 +503,8 @@ def generate_office_level(ctx: "GenerationContext") -> GameMap:
         max_rooms_override = None
         inn_floor_tile = None
         exit_hallway_chance = 0.0
+        scatter_floor_tile = None
+        scatter_floor_chance = 0.0
 
     game_map = GameMap(ctx.width, ctx.height, wall_tile=wall_tile)
     rooms: list[RectangularRoom] = []
@@ -569,4 +591,6 @@ def generate_office_level(ctx: "GenerationContext") -> GameMap:
         _place_inn(game_map, rooms, inn_floor_tile)
     _place_exit_hallway(game_map, ctx.rng, floor_tile, chance=exit_hallway_chance)
     _place_columns(game_map, rooms, exclude=stairs_position, column_spacing=style.column_spacing)
+    if scatter_floor_tile is not None and scatter_floor_chance > 0:
+        _scatter_floor(game_map, ctx.rng, floor_tile, scatter_floor_tile, chance=scatter_floor_chance)
     return game_map

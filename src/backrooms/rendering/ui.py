@@ -34,6 +34,7 @@ TILE_LABELS = {
     "cold_wall": "Frosted Wall",
     "cold_floor": "Iced Floor",
     "flooded_wall": "Water-Stained Wall",
+    "damp_floor": "Damp Floor",
     "flooded_floor": "Flooded Floor",
 }
 
@@ -130,6 +131,12 @@ TILE_DESCRIPTIONS: dict[str, tuple[str, ...]] = {
         "Water seeps down it in dark sheets and pools at the base.",
         "The drywall has gone soft and bulging, ready to sag inward.",
         "Old tide-lines stripe it, each one higher than the last.",
+    ),
+    "damp_floor": (
+        "The carpet squelches, sodden, but there's no standing water here.",
+        "Water-stained and swollen underfoot, though it's held its shape.",
+        "Mold creeps along the seams, but this stretch has drained dry.",
+        "Damp, close air. At least your boots aren't in the water here.",
     ),
     "flooded_floor": (
         "Ankle-deep water, brown and still, with an oily sheen on top.",
@@ -435,6 +442,12 @@ def render_character_screen(console: "tcod.console.Console", engine: "Engine") -
         lines.append((f"Light     {int(light.fuel)}/{int(light.max_fuel)} fuel  ({state}, radius {light.radius})", Color.WARNING))
     else:
         lines.append(("Light     no light source", Color.GREY))
+
+    if player.afflictions is not None and player.afflictions.active:
+        lines.append(("", Color.WHITE))
+        lines.append(("Afflictions", Color.HAZARD))
+        for name in sorted(player.afflictions.active):
+            lines.append((f"  {name}", Color.HAZARD))
 
     for i, (text, color) in enumerate(lines):
         console.print(4, 3 + i, text, fg=color)

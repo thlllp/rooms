@@ -292,6 +292,15 @@ class LevelDefinition:
     # to the next without touching any Elder's own stock. Only meaningful on a
     # level that actually has an Elder.
     barter_price_multiplier: float = 1.0
+    # After the map is carved, generate_office_level converts each base-floor
+    # tile to this tile with scatter_floor_chance probability -- for a level
+    # that wants patches of a second floor type scattered through it rather
+    # than one uniform floor (Level 1.11 flooding damp ground with pools of
+    # contaminated water). None (the default) leaves the floor uniform.
+    # Feature tiles (stairs/door), reskinned rooms, and the spawn tile are
+    # never overwritten (see generator_office._scatter_floor).
+    scatter_floor_tile: np.ndarray | None = None
+    scatter_floor_chance: float = 0.0
 
     def feature_trigger_tile_ids(self) -> frozenset[str]:
         """Every tile_id that would fire a FEATURE_STEPPED_ON transition on

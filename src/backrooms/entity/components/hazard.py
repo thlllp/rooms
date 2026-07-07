@@ -213,15 +213,6 @@ def make_twilight_zone(*, radius: int = 2, severity: float = 3.0) -> HazardCompo
     )
 
 
-def make_contaminated_water(*, radius: int = 1, severity: float = 2.0) -> HazardComponent:
-    return HazardComponent(
-        "contaminated_water",
-        tick_proximity_damage,
-        severity=severity,
-        data={"radius": radius, "message": "The foul water sickens you where it touches."},
-    )
-
-
 def make_unstable_floor(*, collapse_threshold: int = 4, event_flag: str = "floor_collapsed") -> HazardComponent:
     return HazardComponent(
         "unstable_floor",

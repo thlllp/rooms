@@ -21,7 +21,6 @@ from backrooms.entity.components.equippable import EquippableComponent
 from backrooms.entity.components.fighter import Fighter
 from backrooms.entity.components.hazard import (
     LootEntry,
-    make_contaminated_water,
     make_debris_pile,
     make_heat_zone,
     make_impact_zone,
@@ -170,22 +169,6 @@ def _spawn_lurker() -> Entity:
         dread_radius=6,
         ai=WanderingAI(perception_radius=8),
         fighter=Fighter(hp=12, endurance=0, power=0),
-    )
-
-
-# Level 1.11's contaminated standing water (see LEVEL_1_11 / the Backrooms
-# "Water Damage" level): illness from prolonged contact, modeled as a
-# tile-anchored physical-damage zone (see hazard.make_contaminated_water) --
-# the flooded floor itself, not a spot you cross once and forget.
-def _spawn_contaminated_water() -> Entity:
-    return Entity(
-        0,
-        0,
-        char="~",
-        color=(60, 100, 95),
-        name="Contaminated Water",
-        render_order=RenderOrder.HAZARD,
-        hazard=make_contaminated_water(radius=1, severity=2.0),
     )
 
 
@@ -989,12 +972,14 @@ LEVEL_1_66 = register(
 
 # Level 1.11 -- based on the Backrooms' Level 0.11, "Water Damage" (same
 # naming convention as 1.22/1.66: game name 1.XX, based on the wiki's 0.XX): a
-# flooded, contaminated fall-only sublevel. Murky water reskin
-# (tile_types.FLOODED_WALL/FLOOR). Its signature danger is the contaminated
-# standing water (_spawn_contaminated_water) -- illness from lingering in it.
-# Unlike 1.22/1.66 it isn't lifeless: the Skin-Stealer (_spawn_skin_stealer)
-# hunts here. Like its 1.XX siblings it has no inn or settlement -- it's a
-# hostile detour, not a rest stop; its exits lead onward to level_1_office.
+# water-damaged, contaminated fall-only sublevel. A DAMP (dry-ish) base floor
+# with patches of contaminated standing water scattered over it (see
+# scatter_floor_tile / tile_types.FLOODED_FLOOR) -- lingering in that water
+# risks the Hydrolitis Plague, scaled by endurance (see
+# systems/disease_system.py), rather than dealing flat damage. Unlike 1.22/1.66
+# it isn't lifeless: the Skin-Stealer (_spawn_skin_stealer) hunts here. Its
+# exits all lead on to level_1_22 -- 1.11 flows into 1.22, not back to the
+# main line.
 LEVEL_1_11 = register(
     LevelDefinition(
         id="level_1_11",
@@ -1005,7 +990,11 @@ LEVEL_1_11 = register(
         is_well_lit=True,
         door_exit_chance=0.5,
         wall_tile=tile_types.FLOODED_WALL,
-        floor_tile=tile_types.FLOODED_FLOOR,
+        floor_tile=tile_types.DAMP_FLOOR,
+        # Pools of contaminated water dotted over the damp floor -- not every
+        # tile, just patches (see generator_office._scatter_floor).
+        scatter_floor_tile=tile_types.FLOODED_FLOOR,
+        scatter_floor_chance=0.18,
         kind=LevelKind.INDOOR,
         stability=LevelStability.UNSTABLE,
         isolation=True,
@@ -1014,20 +1003,33 @@ LEVEL_1_11 = register(
             SpawnEntry(factory=_spawn_almond_water, weight=1.0, min_count=1, max_count=2),
         ),
         hazard_table=(
-            SpawnEntry(factory=_spawn_contaminated_water, weight=1.0, min_count=2, max_count=4),
             SpawnEntry(factory=_spawn_unstable_floor, weight=1.0, min_count=1, max_count=1),
             SpawnEntry(factory=_spawn_debris_pile_office, weight=1.0, min_count=1, max_count=1),
         ),
         transition_rules=(
-            # A fall-only detour -- collapsing through, or taking the
-            # stairs/door, carries you onward to level_1_office.
+            # 1.11 flows into 1.22 by every route, but the flavor has to match
+            # how you left: a collapse is a fall ("drop through"), while the
+            # stairs and door are walked -- so those get their own lines rather
+            # than the generic _looping_stairs_and_door flavor, which would read
+            # wrong ("you drop through" when you simply opened a door).
             TransitionRule(
                 trigger=TriggerKind.EVENT_FLAG_SET,
                 event_flag="floor_collapsed",
-                destinations=(DestinationOption("level_1_office", 1.0),),
+                destinations=(DestinationOption("level_1_22", 1.0),),
                 message="The waterlogged floor tears open and you drop through.",
             ),
-            *_looping_stairs_and_door("level_1_office"),
+            TransitionRule(
+                trigger=TriggerKind.FEATURE_STEPPED_ON,
+                feature_tile_id="stairs_down",
+                destinations=(DestinationOption("level_1_22", 1.0),),
+                message="You climb a stairwell up out of the flooding.",
+            ),
+            TransitionRule(
+                trigger=TriggerKind.FEATURE_STEPPED_ON,
+                feature_tile_id="door_exit",
+                destinations=(DestinationOption("level_1_22", 1.0),),
+                message="You force a swollen door and step out of the water.",
+            ),
         ),
     )
 )

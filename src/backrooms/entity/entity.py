@@ -4,6 +4,7 @@ from enum import IntEnum, auto
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from backrooms.entity.components.afflictions import AfflictionsComponent
     from backrooms.entity.components.ai import BaseAI
     from backrooms.entity.components.attributes import AttributesComponent
     from backrooms.entity.components.barter import BarterComponent
@@ -68,6 +69,7 @@ class Entity:
         equipment: "EquipmentComponent | None" = None,
         equippable: "EquippableComponent | None" = None,
         barter: "BarterComponent | None" = None,
+        afflictions: "AfflictionsComponent | None" = None,
     ) -> None:
         self.x = x
         self.y = y
@@ -118,6 +120,7 @@ class Entity:
             "equipment": equipment,
             "equippable": equippable,
             "barter": barter,
+            "afflictions": afflictions,
         }
         for name, component in components.items():
             setattr(self, name, component)

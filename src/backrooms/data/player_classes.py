@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from backrooms.constants import Color
+from backrooms.entity.components.afflictions import AfflictionsComponent
 from backrooms.entity.components.attributes import (
     BASELINE_ATTRIBUTE,
     AttributesComponent,
@@ -102,4 +103,5 @@ def build_player(player_class: PlayerClass) -> Entity:
         quickness=QuicknessComponent(value=player_class.quickness),
         hunger=HungerComponent(max_hunger=100.0),
         equipment=EquipmentComponent(),
+        afflictions=AfflictionsComponent(),
     )
