@@ -29,6 +29,12 @@ TILE_LABELS = {
     "inn_floor": "Inn Floor",
     "pipeworks_wall": "Pipe-Lined Wall",
     "pipeworks_floor": "Tiled Floor",
+    "remodeled_wall": "Drywall",
+    "remodeled_floor": "Plywood Subfloor",
+    "cold_wall": "Frosted Wall",
+    "cold_floor": "Iced Floor",
+    "flooded_wall": "Water-Stained Wall",
+    "flooded_floor": "Flooded Floor",
 }
 
 # Flavor text pools for look mode, keyed by tile_id. Several lines per kind
@@ -94,6 +100,42 @@ TILE_DESCRIPTIONS: dict[str, tuple[str, ...]] = {
         "Warm underfoot -- something down there is still running.",
         "A faint metallic smell rises from between the tiles.",
         "Condensation beads along a seam and drips somewhere out of sight.",
+    ),
+    "remodeled_wall": (
+        "Fresh drywall, taped at the seams but never painted.",
+        "Someone's pencil marks and a stud line, like the work stopped mid-measure.",
+        "The primer's still tacky in places. Nobody's touched it in a long time.",
+        "Smooth, pale, and blank -- too new for a building this quiet.",
+    ),
+    "remodeled_floor": (
+        "Bare plywood subfloor, the tongue-and-groove seams still exposed.",
+        "Sawdust drifts in the corners. The tools that made it are nowhere in sight.",
+        "It flexes very slightly underfoot, like it was never quite finished.",
+        "Chalk snap-lines cross the boards toward a wall that isn't there.",
+    ),
+    "cold_wall": (
+        "Frost furs the wallpaper in feathered white crystals.",
+        "It's cold enough to burn. Your breath fogs and hangs in the air.",
+        "A faint static prickle runs up your arm as you near it.",
+        "The wall creaks -- and you're no longer sure it's where it was a moment ago.",
+    ),
+    "cold_floor": (
+        "A skin of ice over the carpet, crunching underfoot.",
+        "So cold it aches through your shoes. Nothing grows here, nothing lasts.",
+        "Your light seems thinner here, like the dark is drinking it.",
+        "Rime spreads from your footprints in slow, branching lines.",
+    ),
+    "flooded_wall": (
+        "Black mold blooms across the swollen, peeling wallpaper.",
+        "Water seeps down it in dark sheets and pools at the base.",
+        "The drywall has gone soft and bulging, ready to sag inward.",
+        "Old tide-lines stripe it, each one higher than the last.",
+    ),
+    "flooded_floor": (
+        "Ankle-deep water, brown and still, with an oily sheen on top.",
+        "Something rotten rises off the standing water in a warm reek.",
+        "The water laps at your shins. You don't want it in any open cut.",
+        "Ripples spread from your steps and don't quite settle again.",
     ),
 }
 
@@ -357,7 +399,7 @@ def render_character_screen(console: "tcod.console.Console", engine: "Engine") -
 
     if player.fighter is not None:
         lines.append((f"HP        {int(player.fighter.hp)}/{player.fighter.max_hp}", Color.WHITE))
-        lines.append((f"Endurance {player.fighter.endurance}  (physical damage mitigation)", Color.GREY))
+        lines.append((f"Mitigation {player.fighter.endurance}  (physical damage mitigation)", Color.GREY))
         lines.append((f"Power     {player.fighter.power}  (physical damage dealt)", Color.GREY))
     else:
         lines.append(("HP        --", Color.GREY))
@@ -431,3 +473,58 @@ def render_inventory_screen(console: "tcod.console.Console", engine: "Engine") -
             console.print(4, 3 + i, f"{i + 1}) {item.name}{suffix}", fg=Color.WHITE)
 
     console.print(4, console.height - 3, "[1-9] Use/Equip  [I/Esc] Close", fg=Color.GREY)
+
+
+def render_barter_screen(console: "tcod.console.Console", engine: "Engine") -> None:
+    """A full-console modal, opened by bumping a community Elder (see
+    actions.BumpAction). Number keys 1-9 buy the matching row (see
+    input_handlers.INVENTORY_SLOT_KEYS -> actions.BarterAction). Prices are
+    this level's, already scaled by LevelDefinition.barter_price_multiplier, so
+    the same good reads as more or fewer currency items in different
+    communities."""
+    console.clear(ch=ord(" "), fg=Color.WHITE, bg=Color.BLACK)
+
+    partner = engine.barter_partner
+    barter = partner.barter if partner is not None else None
+    width = min(56, console.width - 4)
+    console.draw_frame(
+        x=2,
+        y=1,
+        width=width,
+        height=console.height - 2,
+        clear=True,
+        fg=Color.WHITE,
+        bg=Color.BLACK,
+        decoration="+-+| |+-+",
+    )
+    title = f" {partner.name} " if partner is not None else " Barter "
+    console.print(4, 1, title, fg=Color.WHITE, bg=Color.BLACK)
+
+    if barter is None:
+        console.print(4, 3, "(no one to trade with)", fg=Color.GREY)
+        console.print(4, console.height - 3, "[Esc] Close", fg=Color.GREY)
+        return
+
+    if engine.barter_greeting:
+        console.print(4, 3, f'"{engine.barter_greeting}"', fg=Color.GREY)
+
+    held = engine.player.inventory.items if engine.player.inventory is not None else []
+    on_hand = sum(1 for item in held if item.name == barter.currency_item_name)
+    console.print(4, 5, f"You carry {on_hand} {barter.currency_item_name}.", fg=Color.WHITE)
+
+    multiplier = LEVEL_REGISTRY[engine.current_level_id].barter_price_multiplier
+    if not barter.offers:
+        console.print(4, 7, "The stock is bare. Nothing left to trade.", fg=Color.GREY)
+    else:
+        for i, offer in enumerate(barter.offers):
+            price = barter.price_for(offer, multiplier=multiplier)
+            affordable = on_hand >= price
+            # A factory call just to read the good's name is cheap and keeps
+            # the display name as the single source of truth (the item itself),
+            # rather than duplicating names into the offer table.
+            name = offer.result_factory().name
+            color = Color.WHITE if affordable else Color.GREY
+            marker = "" if affordable else "  (can't afford)"
+            console.print(4, 7 + i, f"{i + 1}) {name} -- {price} {barter.currency_item_name}{marker}", fg=color)
+
+    console.print(4, console.height - 3, "[1-9] Trade  [Esc] Close", fg=Color.GREY)

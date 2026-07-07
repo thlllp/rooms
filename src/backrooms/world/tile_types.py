@@ -186,3 +186,57 @@ PIPEWORKS_FLOOR = new_tile(
     light=(ord(" "), Color.WHITE, Color.PIPEWORKS_FLOOR_LIT),
     tile_id="pipeworks_floor",
 )
+
+# Level 1.22's "Fully Remodeled" reskin of WALL/FLOOR -- raw off-white
+# drywall and bare plywood subfloor of an unfinished renovation.
+REMODELED_WALL = new_tile(
+    walkable=False,
+    transparent=False,
+    dark=(ord(" "), Color.WHITE, Color.REMODELED_WALL_DARK),
+    light=(ord(" "), Color.WHITE, Color.REMODELED_WALL_LIT),
+    tile_id="remodeled_wall",
+)
+
+REMODELED_FLOOR = new_tile(
+    walkable=True,
+    transparent=True,
+    dark=(ord(" "), Color.WHITE, Color.REMODELED_FLOOR_DARK),
+    light=(ord(" "), Color.WHITE, Color.REMODELED_FLOOR_LIT),
+    tile_id="remodeled_floor",
+)
+
+# Level 1.66's "The Lobby Went COLD" reskin of WALL/FLOOR -- frost-blued
+# walls and a pale, icy floor.
+COLD_WALL = new_tile(
+    walkable=False,
+    transparent=False,
+    dark=(ord(" "), Color.WHITE, Color.COLD_WALL_DARK),
+    light=(ord(" "), Color.WHITE, Color.COLD_WALL_LIT),
+    tile_id="cold_wall",
+)
+
+COLD_FLOOR = new_tile(
+    walkable=True,
+    transparent=True,
+    dark=(ord(" "), Color.WHITE, Color.COLD_FLOOR_DARK),
+    light=(ord(" "), Color.WHITE, Color.COLD_FLOOR_LIT),
+    tile_id="cold_floor",
+)
+
+# Level 1.11's "Water Damage" reskin of WALL/FLOOR -- mold-stained walls and
+# murky standing water.
+FLOODED_WALL = new_tile(
+    walkable=False,
+    transparent=False,
+    dark=(ord(" "), Color.WHITE, Color.FLOODED_WALL_DARK),
+    light=(ord(" "), Color.WHITE, Color.FLOODED_WALL_LIT),
+    tile_id="flooded_wall",
+)
+
+FLOODED_FLOOR = new_tile(
+    walkable=True,
+    transparent=True,
+    dark=(ord(" "), Color.WHITE, Color.FLOODED_FLOOR_DARK),
+    light=(ord(" "), Color.WHITE, Color.FLOODED_FLOOR_LIT),
+    tile_id="flooded_floor",
+)

@@ -31,9 +31,14 @@ def test_dev_mode_reprints_on_level_transition(capsys):
 
 
 def test_exit_rule_cross_references_hazard_source(capsys):
+    # An EVENT_FLAG_SET exit rule is annotated with the hazard(s) that set its
+    # flag. Several hazards can now share one flag (Unstable Floor and Weak
+    # Floorboards both set "floor_collapsed"), and game_map.entities is an
+    # unordered set, so assert the source appears somewhere in the annotation
+    # rather than as the first one after "source: ".
     Engine(player=_make_player(), seed=1, dev_mode=True)
     captured = capsys.readouterr()
-    assert "source: Unstable Floor@" in captured.out
+    assert "Unstable Floor@" in captured.out
 
 
 def test_entrances_reachable_from_is_empty_for_entry_level(capsys):

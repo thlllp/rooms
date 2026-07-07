@@ -61,6 +61,9 @@ def render_all(console: "tcod.console.Console", engine: "Engine") -> None:
     if engine.show_inventory:
         ui.render_inventory_screen(console, engine)
         return
+    if engine.show_barter:
+        ui.render_barter_screen(console, engine)
+        return
 
     render_map(console, engine)
     if engine.traveling:

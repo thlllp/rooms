@@ -70,6 +70,29 @@ class Color:
     PIPEWORKS_FLOOR_DARK = (32, 20, 12)
     PIPEWORKS_FLOOR_LIT = (140, 95, 55)
 
+    # Level 1.22's "Fully Remodeled" look -- an unfinished renovation: raw
+    # off-white drywall walls and bare plywood subfloor, cleaner and paler
+    # than the office wallpaper but flat and unlived-in.
+    REMODELED_WALL_DARK = (40, 40, 38)
+    REMODELED_WALL_LIT = (205, 200, 188)
+    REMODELED_FLOOR_DARK = (34, 28, 20)
+    REMODELED_FLOOR_LIT = (170, 140, 95)
+
+    # Level 1.66's "The Lobby Went COLD" look -- frost-blued walls and a pale,
+    # icy floor; drained of the office's warm yellow, everything tinted toward
+    # a cold grey-blue.
+    COLD_WALL_DARK = (22, 30, 38)
+    COLD_WALL_LIT = (120, 150, 175)
+    COLD_FLOOR_DARK = (26, 34, 42)
+    COLD_FLOOR_LIT = (160, 185, 205)
+
+    # Level 1.11's "Water Damage" look -- mold-stained walls and murky standing
+    # water; the office palette gone damp and green-black.
+    FLOODED_WALL_DARK = (18, 26, 22)
+    FLOODED_WALL_LIT = (72, 92, 78)
+    FLOODED_FLOOR_DARK = (14, 24, 28)
+    FLOODED_FLOOR_LIT = (55, 90, 100)
+
     PLAYER = (230, 230, 200)
 
     MESSAGE_LOG = (200, 200, 200)

@@ -284,6 +284,14 @@ class LevelDefinition:
     # never gets one; every edge crossing is just the normal uses_edge_exit
     # loop.
     exit_hallway_chance: float = 0.0
+    # Scales every barter price quoted by this level's community Elder (see
+    # entity.components.barter.BarterComponent.price_for / actions.BarterAction).
+    # 1.0 (the default) is "at par" -- a good costs exactly its base price in
+    # currency items. A higher value makes this community's goods pricier, a
+    # lower one cheaper, so the same item's cost fluctuates from one community
+    # to the next without touching any Elder's own stock. Only meaningful on a
+    # level that actually has an Elder.
+    barter_price_multiplier: float = 1.0
 
     def feature_trigger_tile_ids(self) -> frozenset[str]:
         """Every tile_id that would fire a FEATURE_STEPPED_ON transition on

@@ -17,6 +17,7 @@ from backrooms.constants import (
 )
 from backrooms.actions import (
     AutoExploreAction,
+    BarterAction,
     BumpAction,
     EscapeAction,
     ToggleCharacterScreenAction,
@@ -46,6 +47,7 @@ MODE_ALLOWED_ACTIONS: dict[str, tuple[type, ...]] = {
     "show_character_screen": (ToggleCharacterScreenAction, EscapeAction),
     "look_mode": (BumpAction, ToggleLookModeAction, EscapeAction),
     "show_inventory": (UseItemAction, ToggleInventoryAction, EscapeAction),
+    "show_barter": (BarterAction, EscapeAction),
 }
 assert set(MODE_ALLOWED_ACTIONS) == set(MODAL_FLAGS), "MODE_ALLOWED_ACTIONS must cover exactly Engine.MODAL_FLAGS"
 
@@ -135,7 +137,7 @@ def main() -> None:
             engine.message_log.add_message(
                 f"DEV MODE: started on '{args.dev_level}', HP/sanity effectively infinite.", color=Color.WARNING
             )
-        event_handler = EventHandler(actor=player)
+        event_handler = EventHandler(actor=player, engine=engine)
 
         while True:
             render_all(console, engine)

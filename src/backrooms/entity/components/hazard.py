@@ -94,6 +94,42 @@ def tick_spore_damage(entity: "Entity", engine: "Engine") -> None:
         engine.kill_entity(player)
 
 
+def tick_proximity_damage(entity: "Entity", engine: "Engine") -> None:
+    """Tile-anchored physical radius damage -- the same shape as
+    tick_spore_damage but purely physical: no face-slot mask resistance (this
+    isn't a respiratory hazard) and no sanity component. The flavor line comes
+    from `data["message"]` so one tick serves every "stand near it and it
+    hurts" hazard (combusting heaters, lurching walls, ...) without a
+    near-identical copy per kind."""
+    player = engine.player
+    radius = entity.hazard.data.get("radius", 0)
+    if chebyshev_distance(player.x, player.y, entity.x, entity.y) > radius:
+        return
+
+    if player.fighter is not None:
+        player.fighter.take_damage(entity.hazard.severity)
+        engine.message_log.add_message(entity.hazard.data.get("message", "It hurts."), color=Color.HAZARD)
+        # Hazard damage can kill the player same as combat -- route through
+        # the same kill_entity path, or game_over never gets set.
+        if player.fighter.hp <= 0:
+            engine.kill_entity(player)
+
+
+def tick_sanity_drain_zone(entity: "Entity", engine: "Engine") -> None:
+    """Tile-anchored radius zone that erodes only sanity, no HP (see Level
+    1.66's Twilight Zones): a dark pocket that's disorienting rather than
+    physically dangerous. Same live-radius check as tick_spore_damage so the
+    spawner can drop it anywhere without knowing the map up front."""
+    player = engine.player
+    radius = entity.hazard.data.get("radius", 0)
+    if chebyshev_distance(player.x, player.y, entity.x, entity.y) > radius:
+        return
+
+    if player.sanity is not None:
+        player.sanity.drain(entity.hazard.severity)
+        engine.message_log.add_message(entity.hazard.data.get("message", "The dark presses in."), color=Color.HAZARD)
+
+
 def tick_unstable_floor(entity: "Entity", engine: "Engine") -> None:
     """Sets an event flag after enough steps on it -- composes with an
     EVENT_FLAG_SET TransitionRule for free, no bespoke collapse logic here."""
@@ -135,6 +171,42 @@ def tick_debris_pile(entity: "Entity", engine: "Engine") -> None:
 
 def make_spore_zone(*, radius: int = 1, severity: float = 2.0) -> HazardComponent:
     return HazardComponent(SPORE_DAMAGE_KIND, tick_spore_damage, severity=severity, data={"radius": radius})
+
+
+def make_heat_zone(*, radius: int = 1, severity: float = 3.0) -> HazardComponent:
+    return HazardComponent(
+        "heat_damage",
+        tick_proximity_damage,
+        severity=severity,
+        data={"radius": radius, "message": "The heat sears you."},
+    )
+
+
+def make_impact_zone(*, radius: int = 1, severity: float = 4.0) -> HazardComponent:
+    return HazardComponent(
+        "impact_damage",
+        tick_proximity_damage,
+        severity=severity,
+        data={"radius": radius, "message": "A wall lurches past, fast enough to break bone."},
+    )
+
+
+def make_twilight_zone(*, radius: int = 2, severity: float = 3.0) -> HazardComponent:
+    return HazardComponent(
+        "twilight_zone",
+        tick_sanity_drain_zone,
+        severity=severity,
+        data={"radius": radius, "message": "The dark swallows your light and your nerve with it."},
+    )
+
+
+def make_contaminated_water(*, radius: int = 1, severity: float = 2.0) -> HazardComponent:
+    return HazardComponent(
+        "contaminated_water",
+        tick_proximity_damage,
+        severity=severity,
+        data={"radius": radius, "message": "The foul water sickens you where it touches."},
+    )
 
 
 def make_unstable_floor(*, collapse_threshold: int = 4, event_flag: str = "floor_collapsed") -> HazardComponent:

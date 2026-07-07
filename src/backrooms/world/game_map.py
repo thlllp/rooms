@@ -45,7 +45,7 @@ class GameMap:
         # to spawn LevelDefinition.inn_furniture_factories near it.
         self.inn_room_center: tuple[int, int] | None = None
         # Set by generate_office_level._place_exit_hallway when
-        # LevelDefinition.has_exit_hallway is set -- the exact tile at the
+        # LevelDefinition.exit_hallway_chance rolls in -- the exact tile at the
         # hallway's far end, consumed by actions.MovementAction._handle_edge
         # to tell "stepped off the map via the hallway" apart from any other
         # edge crossing on this same level.

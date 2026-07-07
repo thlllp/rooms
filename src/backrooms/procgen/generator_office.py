@@ -423,24 +423,40 @@ def _place_exit_hallway(game_map: GameMap, rng: "random.Random", floor_tile: np.
         return
 
     spawn_x, spawn_y = game_map.spawn_point
-    wall = rng.choice(("left", "right", "top", "bottom"))
+
+    # The boundary tile each wall's hallway would terminate on. Skip any wall
+    # whose terminal coincides with an existing edge_entry_point: on a STABLE
+    # edge-exit level (the garage) the spawn room is itself a forced edge
+    # room, so a hallway down its own wall lands on the exact tile the normal
+    # same-level edge return already uses -- silently hijacking it (sets
+    # exit_hallway_crossed instead of map_edge_exited, see
+    # actions.MovementAction._handle_edge). A bonus find; if every wall
+    # collides, just skip carving one this zone.
+    terminals = {
+        "left": (0, spawn_y),
+        "right": (game_map.width - 1, spawn_y),
+        "top": (spawn_x, 0),
+        "bottom": (spawn_x, game_map.height - 1),
+    }
+    existing_exits = set(game_map.edge_entry_points.values())
+    candidates = [w for w, t in terminals.items() if t not in existing_exits]
+    if not candidates:
+        return
+    wall = rng.choice(candidates)
 
     if wall == "left":
         for x in range(spawn_x, -1, -1):
             game_map.tiles[x, spawn_y] = floor_tile
-        game_map.exit_hallway_position = (0, spawn_y)
     elif wall == "right":
         for x in range(spawn_x, game_map.width):
             game_map.tiles[x, spawn_y] = floor_tile
-        game_map.exit_hallway_position = (game_map.width - 1, spawn_y)
     elif wall == "top":
         for y in range(spawn_y, -1, -1):
             game_map.tiles[spawn_x, y] = floor_tile
-        game_map.exit_hallway_position = (spawn_x, 0)
     else:
         for y in range(spawn_y, game_map.height):
             game_map.tiles[spawn_x, y] = floor_tile
-        game_map.exit_hallway_position = (spawn_x, game_map.height - 1)
+    game_map.exit_hallway_position = terminals[wall]
 
 
 def generate_office_level(ctx: "GenerationContext") -> GameMap:

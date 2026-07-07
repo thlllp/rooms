@@ -30,7 +30,7 @@ from backrooms.world.level_registry import (
 # hand-written line per flag that's easy to forget -- see main.py's
 # MODE_ALLOWED_ACTIONS, which is keyed by these same names and asserts its
 # keys match this tuple exactly).
-MODAL_FLAGS = ("show_character_screen", "show_inventory", "look_mode")
+MODAL_FLAGS = ("show_character_screen", "show_inventory", "look_mode", "show_barter")
 
 # Wall crossed -> which neighboring zone coordinate that leads to, and which
 # wall of that neighbor the player arrives at (the opposite side -- walk off
@@ -160,6 +160,12 @@ class Engine:
     def _reset_modal_flags(self) -> None:
         for flag in MODAL_FLAGS:
             setattr(self, flag, False)
+        # The Elder currently being bartered with (set when show_barter opens,
+        # see actions.BumpAction) and the greeting line shown atop that screen.
+        # Cleared alongside the flags so a level transition can never leave the
+        # barter screen pointed at an entity from the level you just left.
+        self.barter_partner: "Entity | None" = None
+        self.barter_greeting: str = ""
 
     def load_level(self, level_id: str) -> None:
         # Whether this counts as "still repeating the same level type" --

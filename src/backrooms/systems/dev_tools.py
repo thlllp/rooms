@@ -26,6 +26,8 @@ def _categorize(entity: "Entity") -> str:
         return f"hazard:{entity.hazard.kind}"
     if entity.consumable is not None:
         return "item"
+    if entity.barter is not None:
+        return "vendor"
     if entity.blocks_movement or entity.blocks_sight:
         return "structural"
     return "object"

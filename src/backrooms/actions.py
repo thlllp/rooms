@@ -42,6 +42,9 @@ class EscapeAction(Action):
             engine.show_character_screen = False
         elif engine.show_inventory:
             engine.show_inventory = False
+        elif engine.show_barter:
+            engine.show_barter = False
+            engine.barter_partner = None
         else:
             raise SystemExit()
 
@@ -312,7 +315,7 @@ class MovementAction(Action):
         (see Engine.load_level).
 
         If the player is standing exactly on this zone's
-        GameMap.exit_hallway_position (see LevelDefinition.has_exit_hallway/
+        GameMap.exit_hallway_position (see LevelDefinition.exit_hallway_chance/
         generator_office._place_exit_hallway), sets "exit_hallway_crossed"
         INSTEAD of the usual "map_edge_exited" -- deliberately mutually
         exclusive, so this level's own TransitionRule for that flag decides
@@ -423,6 +426,53 @@ class TalkAction(Action):
         engine.message_log.add_message(f'{self.target.name}: "{line}"', color=Color.WHITE)
 
 
+class BarterAction(Action):
+    """Buys one of the Elder's offers by row number while the barter screen is
+    open (see engine.MODAL_FLAGS "show_barter"). Browsing/trading never costs a
+    turn -- you're in a safe community. The price is the offer's base price
+    scaled by this level's barter_price_multiplier (so the same good costs
+    more/less per community), paid in whole currency items from the player's
+    held inventory; the bought offer is then removed from the Elder's stock."""
+
+    costs_turn = False
+
+    def __init__(self, entity: "Entity", offer_index: int) -> None:
+        super().__init__(entity)
+        self.offer_index = offer_index
+
+    def perform(self, engine: "Engine") -> None:
+        partner = engine.barter_partner
+        if partner is None or partner.barter is None:
+            return
+        barter = partner.barter
+        if not (0 <= self.offer_index < len(barter.offers)):
+            return  # a number key with no offer behind it
+
+        offer = barter.offers[self.offer_index]
+        multiplier = LEVEL_REGISTRY[engine.current_level_id].barter_price_multiplier
+        price = barter.price_for(offer, multiplier=multiplier)
+
+        held = self.entity.inventory.items if self.entity.inventory is not None else []
+        currency = [item for item in held if item.name == barter.currency_item_name]
+        if len(currency) < price:
+            engine.message_log.add_message(
+                f"Not enough {barter.currency_item_name} ({len(currency)}/{price}).", color=Color.GREY
+            )
+            return
+
+        # Pay (currency items are consumed), then hand over the good. Net held
+        # count never rises -- price is >=1 and one item comes back -- so no
+        # capacity check is needed here.
+        for spent in currency[:price]:
+            held.remove(spent)
+        reward = offer.result_factory()
+        held.append(reward)
+        barter.offers.pop(self.offer_index)
+        engine.message_log.add_message(
+            f"Traded {price} {barter.currency_item_name} for {reward.name}.", color=Color.WHITE
+        )
+
+
 class BumpAction(Action):
     """What a directional key actually dispatches. In look mode it steers the
     look cursor (free of walkability/turn cost); otherwise it attacks if the
@@ -450,7 +500,16 @@ class BumpAction(Action):
         dest_y = self.entity.y + self.dy
         target = engine.game_map.get_blocking_entity_at(dest_x, dest_y)
 
-        if target is not None and target.dialogue is not None:
+        if target is not None and target.barter is not None:
+            # Bumping the community Elder opens their barter screen (see
+            # engine.MODAL_FLAGS "show_barter" / rendering.render_barter_screen)
+            # rather than talking or attacking -- checked before dialogue so an
+            # Elder can carry flavor lines too without them shadowing the trade.
+            engine.show_barter = True
+            engine.barter_partner = target
+            engine.barter_greeting = target.barter.pick_greeting(engine.rng)
+            self.costs_turn = False
+        elif target is not None and target.dialogue is not None:
             TalkAction(self.entity, target=target).perform(engine)
         elif target is not None and target.fighter is not None:
             AttackAction(self.entity, self.dx, self.dy, target=target).perform(engine)

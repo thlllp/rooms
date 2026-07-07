@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from backrooms.entity.components.ai import BaseAI
     from backrooms.entity.components.attributes import AttributesComponent
+    from backrooms.entity.components.barter import BarterComponent
     from backrooms.entity.components.consumable import ConsumableComponent
     from backrooms.entity.components.dialogue import DialogueComponent
     from backrooms.entity.components.equipment import EquipmentComponent
@@ -66,6 +67,7 @@ class Entity:
         dialogue: "DialogueComponent | None" = None,
         equipment: "EquipmentComponent | None" = None,
         equippable: "EquippableComponent | None" = None,
+        barter: "BarterComponent | None" = None,
     ) -> None:
         self.x = x
         self.y = y
@@ -115,6 +117,7 @@ class Entity:
             "dialogue": dialogue,
             "equipment": equipment,
             "equippable": equippable,
+            "barter": barter,
         }
         for name, component in components.items():
             setattr(self, name, component)

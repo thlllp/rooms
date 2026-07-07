@@ -7,6 +7,7 @@ import tcod.event
 from backrooms.actions import (
     Action,
     AutoExploreAction,
+    BarterAction,
     BumpAction,
     CraftAction,
     EscapeAction,
@@ -21,6 +22,7 @@ from backrooms.actions import (
 )
 
 if TYPE_CHECKING:
+    from backrooms.engine import Engine
     from backrooms.entity.entity import Entity
 
 MOVE_KEYS = {
@@ -75,10 +77,13 @@ CLASS_SELECT_KEYS = dict(INVENTORY_SLOT_KEYS)
 
 
 class EventHandler(tcod.event.EventDispatch[Action]):
-    """Translates raw tcod events into Action objects for a given actor (the player)."""
+    """Translates raw tcod events into Action objects for a given actor (the
+    player). Holds the engine only so the shared number-key row can be routed
+    to whichever modal screen is open (the barter screen vs. the inventory)."""
 
-    def __init__(self, actor: "Entity") -> None:
+    def __init__(self, actor: "Entity", engine: "Engine") -> None:
         self.actor = actor
+        self.engine = engine
 
     def ev_quit(self, event: tcod.event.Quit) -> Action | None:
         raise SystemExit()
@@ -112,7 +117,14 @@ class EventHandler(tcod.event.EventDispatch[Action]):
         if key in CRAFT_KEYS:
             return CraftAction(self.actor)
         if key in INVENTORY_SLOT_KEYS:
-            return UseItemAction(self.actor, INVENTORY_SLOT_KEYS[key])
+            # The number row means "pick offer N" while the barter screen is
+            # open, and "use/equip slot N" otherwise -- the two never coexist
+            # (both are modal), and main.MODE_ALLOWED_ACTIONS gates each so a
+            # stray number key does nothing outside its own screen.
+            slot = INVENTORY_SLOT_KEYS[key]
+            if self.engine.show_barter:
+                return BarterAction(self.actor, slot)
+            return UseItemAction(self.actor, slot)
         if key in MOVE_KEYS:
             dx, dy = MOVE_KEYS[key]
             return BumpAction(self.actor, dx, dy)
