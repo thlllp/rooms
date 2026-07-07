@@ -297,7 +297,7 @@ register_recipe(CraftingRecipe(name="Mask", ingredients=("Duct Tape", "Rag"), re
 
 # Back-slot equipment -- no passive protection, just extra carrying room
 # (see EquippableComponent.capacity_bonus/EquipmentComponent.capacity_bonus,
-# read by actions._effective_capacity). Found in debris piles like any other
+# read by inventory.effective_capacity). Found in debris piles like any other
 # item, not crafted.
 def _spawn_simple_backpack() -> Entity:
     return Entity(

@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 
 from backrooms.constants import Color
 from backrooms.entity.components.attributes import attribute_value
+from backrooms.entity.components.inventory import effective_capacity
 from backrooms.entity.entity import RenderOrder
 from backrooms.world.crafting import CRAFTING_RECIPES
 from backrooms.world.level_registry import LEVEL_REGISTRY, LEVEL_STYLES
@@ -96,16 +97,6 @@ class ToggleLightAction(Action):
             engine.message_log.add_message("You switch off your light.", color=Color.GREY)
 
 
-def _effective_capacity(player: "Entity") -> int:
-    """Inventory.capacity plus whatever equipped gear adds (e.g. a back-slot
-    backpack) -- computed fresh rather than mutating Inventory.capacity on
-    equip/unequip, so it can never drift out of sync with what's actually
-    worn. Shared by PickupAction and UseItemAction's un-equip path, the two
-    places something can be added to held inventory."""
-    bonus = player.equipment.capacity_bonus() if player.equipment is not None else 0
-    return player.inventory.capacity + bonus
-
-
 class PickupAction(Action):
     def perform(self, engine: "Engine") -> None:
         player = self.entity
@@ -119,7 +110,7 @@ class PickupAction(Action):
             self.costs_turn = False
             engine.message_log.add_message("There's nothing here to pick up.", color=Color.GREY)
             return
-        if len(player.inventory.items) >= _effective_capacity(player):
+        if len(player.inventory.items) >= effective_capacity(player):
             self.costs_turn = False
             engine.message_log.add_message("You can't carry anything else.", color=Color.WARNING)
             return
@@ -232,7 +223,7 @@ class UseItemAction(Action):
                 # before committing, not the current (possibly
                 # backpack-inflated) capacity.
                 previous_bonus = previous.equippable.capacity_bonus if previous is not None else 0
-                capacity_after_swap = _effective_capacity(player) - previous_bonus + item.equippable.capacity_bonus
+                capacity_after_swap = effective_capacity(player) - previous_bonus + item.equippable.capacity_bonus
                 held_after_swap = len(held) - 1 + (1 if previous is not None else 0)
                 if held_after_swap > capacity_after_swap:
                     engine.message_log.add_message(
@@ -257,7 +248,7 @@ class UseItemAction(Action):
         # reflects the capacity the player will actually have the instant
         # after this un-equip, not the (possibly higher, backpack-inflated)
         # capacity they have right now.
-        capacity_after_removal = _effective_capacity(player) - item.equippable.capacity_bonus
+        capacity_after_removal = effective_capacity(player) - item.equippable.capacity_bonus
         if len(held) >= capacity_after_removal:
             engine.message_log.add_message("Your inventory is full.", color=Color.GREY)
             self.costs_turn = False

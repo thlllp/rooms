@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Callable
 
 from backrooms.constants import Color
 from backrooms.entity.components.base_component import BaseComponent
+from backrooms.entity.components.inventory import effective_capacity
 from backrooms.geometry import chebyshev_distance
 
 if TYPE_CHECKING:
@@ -57,16 +58,21 @@ class HazardComponent(BaseComponent):
             self.tick_effect(self.entity, engine)
 
 
+def _player_in_radius(entity: "Entity", engine: "Engine") -> bool:
+    """Whether the player is within the hazard's data['radius'] (Chebyshev) of
+    its tile -- the shared entry gate for every tile-anchored radius hazard.
+    Checked live off the entity's position rather than a precomputed tile set,
+    so the spawner can drop the hazard anywhere without knowing map layout."""
+    player = engine.player
+    return chebyshev_distance(player.x, player.y, entity.x, entity.y) <= entity.hazard.data.get("radius", 0)
+
+
 def tick_spore_damage(entity: "Entity", engine: "Engine") -> None:
     """Tile-anchored damage zone: hurts HP (once Fighter exists) and sanity
-    while the player stands within `radius` tiles of the zone's placement.
-    Radius is checked live off the entity's position rather than a
-    precomputed tile set, so the spawner can drop it anywhere on the
-    generated map without the factory needing to know map layout up front."""
-    player = engine.player
-    radius = entity.hazard.data.get("radius", 0)
-    if chebyshev_distance(player.x, player.y, entity.x, entity.y) > radius:
+    while the player stands within `radius` tiles of the zone's placement."""
+    if not _player_in_radius(entity, engine):
         return
+    player = engine.player
 
     # A worn face-slot item (see EquippableComponent.spore_resistance, e.g.
     # the crafted Mask) blunts this specifically -- a respiratory hazard, not
@@ -101,10 +107,9 @@ def tick_proximity_damage(entity: "Entity", engine: "Engine") -> None:
     from `data["message"]` so one tick serves every "stand near it and it
     hurts" hazard (combusting heaters, lurching walls, ...) without a
     near-identical copy per kind."""
-    player = engine.player
-    radius = entity.hazard.data.get("radius", 0)
-    if chebyshev_distance(player.x, player.y, entity.x, entity.y) > radius:
+    if not _player_in_radius(entity, engine):
         return
+    player = engine.player
 
     if player.fighter is not None:
         player.fighter.take_damage(entity.hazard.severity)
@@ -118,12 +123,10 @@ def tick_proximity_damage(entity: "Entity", engine: "Engine") -> None:
 def tick_sanity_drain_zone(entity: "Entity", engine: "Engine") -> None:
     """Tile-anchored radius zone that erodes only sanity, no HP (see Level
     1.66's Twilight Zones): a dark pocket that's disorienting rather than
-    physically dangerous. Same live-radius check as tick_spore_damage so the
-    spawner can drop it anywhere without knowing the map up front."""
-    player = engine.player
-    radius = entity.hazard.data.get("radius", 0)
-    if chebyshev_distance(player.x, player.y, entity.x, entity.y) > radius:
+    physically dangerous."""
+    if not _player_in_radius(entity, engine):
         return
+    player = engine.player
 
     if player.sanity is not None:
         player.sanity.drain(entity.hazard.severity)
@@ -161,11 +164,9 @@ def tick_debris_pile(entity: "Entity", engine: "Engine") -> None:
         # Put the find straight into the pack rather than dropping it on the
         # tile the player is already standing on -- there it renders hidden
         # under the player and reads as "the message lied, nothing appeared."
-        # Fall back to the floor only when there's genuinely no room (capacity
-        # mirrors actions._effective_capacity: base plus any worn backpack).
+        # Fall back to the floor only when there's genuinely no room.
         inventory = player.inventory
-        bonus = player.equipment.capacity_bonus() if player.equipment is not None else 0
-        if inventory is not None and len(inventory.items) < inventory.capacity + bonus:
+        if inventory is not None and len(inventory.items) < effective_capacity(player):
             inventory.items.append(item)
             engine.message_log.add_message(f"You dig through the debris and find a {item.name}.", color=Color.WHITE)
         else:
