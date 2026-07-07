@@ -77,6 +77,28 @@ class LevelStyle:
     # this kind. None (the default) leaves that fallback alone.
     # LevelDefinition.max_rooms, if set, wins over this for a one-off level.
     max_rooms: int | None = None
+    # False (the default) -- generate_office_level's single stairs/door exit
+    # feature goes in the room farthest from spawn, so reaching it means
+    # actually crossing the level (level_0/level_1's whole point). True puts
+    # it in the spawn room itself instead -- for a kind like SETTLEMENT,
+    # which is meant to be a quick rest stop, not another maze to cross.
+    exit_in_spawn_room: bool = False
+    # False (the default) -- generate_office_level._attempt_room rolls
+    # DOUBLE_WIDE_HALLWAY_CHANCE per tunnel, same as every other kind. True
+    # makes every tunnel between this kind's rooms two tiles wide instead of
+    # the usual 1-in-3 chance -- for a kind like SETTLEMENT, where the whole
+    # level is only a couple of rooms and a consistently wider hallway reads
+    # as more deliberately built than the office levels' cramped corridors.
+    double_wide_tunnels: bool = False
+    # None (the default) -- a new room can land anywhere on the map,
+    # regardless of how far that puts its connecting tunnel from the
+    # previous room. An int instead caps how far (per axis; the tunnel is
+    # L-shaped, so this bounds each of its two straight legs) a new room's
+    # position can be rolled from the previous room's center -- for a kind
+    # like SETTLEMENT, so its few small rooms end up clustered close
+    # together instead of connected by a tunnel spanning most of the map,
+    # keeping it reading as one small, enclosed area.
+    max_tunnel_length: int | None = None
 
 
 LEVEL_STYLES: dict[LevelKind, LevelStyle] = {
@@ -87,7 +109,15 @@ LEVEL_STYLES: dict[LevelKind, LevelStyle] = {
         room_min_size=16, room_max_size=28, column_spacing=5, uses_edge_exit=True, fill_screen=True
     ),
     LevelKind.SETTLEMENT: LevelStyle(
-        room_min_size=5, room_max_size=8, column_spacing=None, uses_edge_exit=False, fill_screen=False, max_rooms=3
+        room_min_size=5,
+        room_max_size=8,
+        column_spacing=None,
+        uses_edge_exit=False,
+        fill_screen=False,
+        max_rooms=3,
+        exit_in_spawn_room=True,
+        double_wide_tunnels=True,
+        max_tunnel_length=15,
     ),
 }
 
@@ -235,6 +265,25 @@ class LevelDefinition:
     # other. None (the default) means this level never gets one. See
     # generator_office._place_inn.
     inn_floor_tile: np.ndarray | None = None
+    # Zero-arg Entity factories placed near the inn room if one was
+    # generated (see inn_floor_tile) -- one instance of each, scattered
+    # around GameMap.inn_room_center the same way sign_factory is placed
+    # near a settlement door. Empty (the default) means no furniture.
+    inn_furniture_factories: tuple[Callable[[], "Entity"], ...] = field(default_factory=tuple)
+    # With this probability, generate_office_level carves one long, narrow
+    # hallway straight from spawn to one map edge (a wall picked fresh per
+    # generated zone) and records its exact terminal tile on
+    # GameMap.exit_hallway_position -- see generator_office._place_exit_hallway.
+    # A bonus find, not guaranteed every zone (same idea as
+    # settlement_door_chance) -- but once one DOES generate, stepping off
+    # the map at THAT specific tile sets the event flag
+    # "exit_hallway_crossed" instead of the usual "map_edge_exited" (see
+    # actions.MovementAction._handle_edge), so this level's own
+    # TransitionRule for that flag decides where it leads deterministically,
+    # unlike a per-edge-crossing chance. 0.0 (the default) means this level
+    # never gets one; every edge crossing is just the normal uses_edge_exit
+    # loop.
+    exit_hallway_chance: float = 0.0
 
     def feature_trigger_tile_ids(self) -> frozenset[str]:
         """Every tile_id that would fire a FEATURE_STEPPED_ON transition on

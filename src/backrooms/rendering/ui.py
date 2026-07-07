@@ -27,6 +27,8 @@ TILE_LABELS = {
     "settlement_door": "Door",
     "settlement_floor": "Floor",
     "inn_floor": "Inn Floor",
+    "pipeworks_wall": "Pipe-Lined Wall",
+    "pipeworks_floor": "Tiled Floor",
 }
 
 # Flavor text pools for look mode, keyed by tile_id. Several lines per kind
@@ -80,6 +82,18 @@ TILE_DESCRIPTIONS: dict[str, tuple[str, ...]] = {
         "A few threadbare bedrolls and a pot that's always warm.",
         "Someone's turned this room into somewhere to actually rest.",
         "It smells like food, faintly. You feel steadier just standing here.",
+    ),
+    "pipeworks_wall": (
+        "Brown rust bleeds down the grey concrete in long streaks.",
+        "A cluster of pipes disappears into the wall and never comes back out.",
+        "Warm to the touch, and it hums faintly, like something's moving inside.",
+        "Grey and brown in patches, like it was patched together from two different buildings.",
+    ),
+    "pipeworks_floor": (
+        "Brown ceramic tile, cracked in a grid where the pipes run underneath.",
+        "Warm underfoot -- something down there is still running.",
+        "A faint metallic smell rises from between the tiles.",
+        "Condensation beads along a seam and drips somewhere out of sight.",
     ),
 }
 
@@ -326,6 +340,18 @@ def render_character_screen(console: "tcod.console.Console", engine: "Engine") -
         lines.append((f"XP        {xp.current_xp}/{xp.xp_to_next_level}", Color.GREY))
     else:
         lines.append(("Level     --", Color.GREY))
+
+    lines.append(("", Color.WHITE))
+
+    if player.attributes is not None:
+        a = player.attributes
+        lines.append((f"Endurance {a.endurance}", Color.GREY))
+        lines.append((f"Willpower {a.willpower}", Color.GREY))
+        lines.append((f"Dexterity {a.dexterity}  (hit/dodge chance)", Color.GREY))
+        lines.append((f"Strength  {a.strength}  (melee damage)", Color.GREY))
+        lines.append((f"Luck      {a.luck}", Color.GREY))
+    else:
+        lines.append(("Stats     --", Color.GREY))
 
     lines.append(("", Color.WHITE))
 

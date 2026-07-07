@@ -18,6 +18,9 @@ class LightSourceComponent(BaseComponent):
         self.burn_rate = burn_rate
         self.is_lit = is_lit
 
+    def restore(self, amount: float) -> None:
+        self.fuel = min(self.max_fuel, self.fuel + amount)
+
 
 def tick_light_fuel(entity: "Entity", engine: "Engine") -> None:
     light = entity.light_source

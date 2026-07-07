@@ -8,11 +8,17 @@ from __future__ import annotations
 
 from backrooms.constants import Color
 from backrooms.entity.components.ai import HostileAI, WanderingAI
-from backrooms.entity.components.consumable import make_hp_for_sanity_item, make_hp_restore_item, make_sanity_restore_item
+from backrooms.entity.components.consumable import (
+    make_fuel_restore_item,
+    make_hp_for_sanity_item,
+    make_hp_restore_item,
+    make_hunger_restore_item,
+    make_sanity_restore_item,
+)
 from backrooms.entity.components.dialogue import DialogueComponent
 from backrooms.entity.components.equippable import EquippableComponent
 from backrooms.entity.components.fighter import Fighter
-from backrooms.entity.components.hazard import make_debris_pile, make_spore_zone, make_unstable_floor
+from backrooms.entity.components.hazard import LootEntry, make_debris_pile, make_spore_zone, make_unstable_floor
 from backrooms.entity.entity import Entity, RenderOrder
 from backrooms.procgen.generator_office import generate_office_level
 from backrooms.world import tile_types
@@ -127,6 +133,23 @@ def _spawn_duct_tape() -> Entity:
     )
 
 
+def _spawn_canned_food() -> Entity:
+    return Entity(
+        0, 0, char="c", color=(180, 150, 60), name="Canned Food", render_order=RenderOrder.ITEM,
+        consumable=make_hunger_restore_item(35.0),
+    )
+
+
+# Refuels a light source (see LightSourceComponent/tick_light_fuel) -- before
+# this, a light that burned out at fuel=0 had no way back; ToggleLightAction
+# would just refuse forever.
+def _spawn_lighter_fluid() -> Entity:
+    return Entity(
+        0, 0, char="!", color=(230, 160, 60), name="Lighter Fluid", render_order=RenderOrder.ITEM,
+        consumable=make_fuel_restore_item(50.0),
+    )
+
+
 # Crafted, not found -- see the recipe registered below. Face-slot
 # equipment: full protection against spore damage/sanity drain while worn
 # (see hazard.tick_spore_damage), no effect on anything else.
@@ -138,6 +161,24 @@ def _spawn_mask() -> Entity:
 
 
 register_recipe(CraftingRecipe(name="Mask", ingredients=("Duct Tape", "Rag"), result_factory=_spawn_mask))
+
+
+# Back-slot equipment -- no passive protection, just extra carrying room
+# (see EquippableComponent.capacity_bonus/EquipmentComponent.capacity_bonus,
+# read by actions._effective_capacity). Found in debris piles like any other
+# item, not crafted.
+def _spawn_simple_backpack() -> Entity:
+    return Entity(
+        0, 0, char="B", color=(120, 100, 70), name="Simple Backpack", render_order=RenderOrder.ITEM,
+        equippable=EquippableComponent(slot="back", capacity_bonus=5),
+    )
+
+
+def _spawn_hiking_bag() -> Entity:
+    return Entity(
+        0, 0, char="H", color=(70, 110, 80), name="Hiking Bag", render_order=RenderOrder.ITEM,
+        equippable=EquippableComponent(slot="back", capacity_bonus=10),
+    )
 
 
 # Peaceful NPC -- the starting slice of the interaction framework. Reuses
@@ -199,6 +240,21 @@ def _spawn_filing_cabinet() -> Entity:
     )
 
 
+# Same purely-decorative shape as _spawn_desk/_spawn_filing_cabinet, but
+# placed near a settlement's inn room specifically (see
+# LevelDefinition.inn_furniture_factories/Engine._generate_map) rather than
+# scattered anywhere via furniture_table -- what makes an inn read as an inn
+# instead of just a differently-colored floor tile.
+def _spawn_bedroll() -> Entity:
+    return Entity(0, 0, char="b", color=(150, 110, 70), name="Bedroll", blocks_movement=True, render_order=RenderOrder.HAZARD)
+
+
+def _spawn_cooking_pot() -> Entity:
+    return Entity(
+        0, 0, char="o", color=(90, 90, 95), name="Cooking Pot", blocks_movement=True, render_order=RenderOrder.HAZARD
+    )
+
+
 # Searchable, one-shot: resolves into either a dropped item or a sanity hit
 # the moment the player steps onto it, then removes itself (see
 # make_debris_pile/tick_debris_pile). Not on level_0_office -- these are
@@ -213,11 +269,19 @@ def _spawn_debris_pile_office() -> Entity:
         render_order=RenderOrder.HAZARD,
         hazard=make_debris_pile(
             item_factories=(
-                _spawn_almond_water,
-                _spawn_first_aid_kit,
-                _spawn_rag,
-                _spawn_liquid_pain,
-                _spawn_duct_tape,
+                LootEntry(_spawn_almond_water),
+                LootEntry(_spawn_first_aid_kit),
+                LootEntry(_spawn_rag),
+                LootEntry(_spawn_liquid_pain),
+                LootEntry(_spawn_duct_tape),
+                LootEntry(_spawn_canned_food),
+                LootEntry(_spawn_lighter_fluid),
+                # Fairly rare here -- weight 0.15 against everything else's
+                # default 1.0, so it turns up roughly 1/7th as often as any
+                # one of the common items above. No Hiking Bag on this pool
+                # at all -- that one's exclusive to the garage's debris (see
+                # _spawn_debris_pile_garage).
+                LootEntry(_spawn_simple_backpack, weight=0.15),
             ),
             good_chance=0.6,
             sanity_penalty=10.0,
@@ -233,7 +297,21 @@ def _spawn_debris_pile_garage() -> Entity:
         color=Color.DEBRIS,
         name="Debris Pile",
         render_order=RenderOrder.HAZARD,
-        hazard=make_debris_pile(item_factories=(_spawn_almond_water,), good_chance=0.6, sanity_penalty=10.0),
+        hazard=make_debris_pile(
+            item_factories=(
+                LootEntry(_spawn_almond_water),
+                LootEntry(_spawn_canned_food),
+                LootEntry(_spawn_lighter_fluid),
+                # Slightly more common than the office debris pool's 0.15 --
+                # still rarer than an ordinary find, just not as rare here.
+                LootEntry(_spawn_simple_backpack, weight=0.3),
+                # Turns up randomly alongside everything else -- rare, and
+                # only ever found here, not in the office's debris pool.
+                LootEntry(_spawn_hiking_bag, weight=0.2),
+            ),
+            good_chance=0.6,
+            sanity_penalty=10.0,
+        ),
     )
 
 
@@ -391,7 +469,32 @@ LEVEL_2_GARAGE = register(
         # is reached (see generator_office._place_settlement_door).
         settlement_door_chance=0.3,
         sign_factory=_spawn_settlement_sign,
+        # A bonus find, not guaranteed every zone (same idea as
+        # settlement_door_chance) -- a long, narrow hallway running straight
+        # from spawn to one (randomly chosen per zone) map edge, structurally
+        # distinct from the cavernous SPACIOUS rooms around it. When one DOES
+        # generate, walking its full length and stepping off the map at its
+        # far end is THE way to level_3_pipeworks -- deterministic once
+        # you've found and walked it, not a per-edge-crossing chance (see the
+        # exit_hallway_crossed transition rule above and
+        # generator_office._place_exit_hallway).
+        exit_hallway_chance=0.25,
         transition_rules=(
+            # Deliberately NOT the same mechanism as level_1_office's door
+            # into here (a random per-edge-crossing chance that grows with
+            # repeat streak) -- this is one specific, findable hallway (see
+            # exit_hallway_chance/generator_office._place_exit_hallway) that
+            # always leads to level_3_pipeworks once you walk its length and
+            # step off the map at its far end. Checked before the generic
+            # map_edge_exited rule below since MovementAction._handle_edge
+            # sets this instead of (never in addition to) that one when the
+            # player is standing on the hallway's exact terminal tile.
+            TransitionRule(
+                trigger=TriggerKind.EVENT_FLAG_SET,
+                event_flag="exit_hallway_crossed",
+                destinations=(DestinationOption("level_3_pipeworks", 1.0),),
+                message="The hallway ends, and the world outside it doesn't look like the garage anymore.",
+            ),
             TransitionRule(
                 trigger=TriggerKind.EVENT_FLAG_SET,
                 event_flag="map_edge_exited",
@@ -425,7 +528,9 @@ LEVEL_2_GARAGE = register(
 # Engine._stable_return), not just some canonical spot.
 # inn_floor_tile carves one room out as a small inn -- HP and hunger
 # passively recover there too, on top of the sanity recovery the rest of the
-# settlement already gives (see systems/rest_system.py).
+# settlement already gives (see systems/rest_system.py). inn_furniture_factories
+# gives that room an actual bedroll/cooking pot, so it reads as an inn rather
+# than just a differently-colored floor tile.
 LEVEL_2_SETTLEMENT = register(
     LevelDefinition(
         id="level_2_settlement",
@@ -436,6 +541,7 @@ LEVEL_2_SETTLEMENT = register(
         wall_tile=tile_types.GARAGE_WALL,
         floor_tile=tile_types.SETTLEMENT_FLOOR,
         inn_floor_tile=tile_types.INN_FLOOR,
+        inn_furniture_factories=(_spawn_bedroll, _spawn_cooking_pot),
         kind=LevelKind.SETTLEMENT,
         stability=LevelStability.STABLE,
         door_exit_chance=1.0,
@@ -458,6 +564,54 @@ LEVEL_2_SETTLEMENT = register(
                 feature_tile_id="door_exit",
                 destinations=(DestinationOption("level_2_garage", 1.0),),
                 message="You step back out into the garage.",
+            ),
+        ),
+    )
+)
+
+# A fourth look -- "pipeworks": brown floor tile and a wall that's a grey/
+# brown amalgamation (see tile_types.PIPEWORKS_WALL/PIPEWORKS_FLOOR), built
+# the same cramped-cubicle-maze way as level_0/level_1 (kind=INDOOR) rather
+# than the garage's cavernous SPACIOUS style. Reachable from level_2_garage
+# (see the map_edge_exited rule above) -- same growing-chance-with-streak
+# mechanism as level_1_office's own door into level_2_garage. No further
+# level past this one yet, so its own exit just loops back into a freshly
+# generated instance of itself, same as level_1_office did before
+# level_2_garage existed.
+LEVEL_3_PIPEWORKS = register(
+    LevelDefinition(
+        id="level_3_pipeworks",
+        display_name="Level 3",
+        generator=generate_office_level,
+        ambient_sanity_drain=0.2,
+        is_well_lit=True,
+        wall_tile=tile_types.PIPEWORKS_WALL,
+        floor_tile=tile_types.PIPEWORKS_FLOOR,
+        door_exit_chance=0.5,
+        kind=LevelKind.INDOOR,
+        stability=LevelStability.UNSTABLE,
+        isolation=True,
+        spawn_table=(
+            SpawnEntry(factory=_spawn_wanderer, weight=1.0, min_count=1, max_count=1),
+            SpawnEntry(factory=_spawn_hollow, weight=1.0, min_count=1, max_count=1),
+            SpawnEntry(factory=_spawn_almond_water, weight=1.0, min_count=1, max_count=2),
+        ),
+        hazard_table=(
+            SpawnEntry(factory=_spawn_spore_zone, weight=1.0, min_count=1, max_count=2),
+            SpawnEntry(factory=_spawn_debris_pile_office, weight=1.0, min_count=1, max_count=1),
+        ),
+        transition_rules=(
+            TransitionRule(
+                trigger=TriggerKind.FEATURE_STEPPED_ON,
+                feature_tile_id="stairs_down",
+                destinations=(DestinationOption("level_3_pipeworks", 1.0),),
+                message="You take the stairs down.",
+            ),
+            TransitionRule(
+                trigger=TriggerKind.FEATURE_STEPPED_ON,
+                feature_tile_id="door_exit",
+                destinations=(DestinationOption("level_3_pipeworks", 1.0),),
+                message="You open the door and step through.",
             ),
         ),
     )

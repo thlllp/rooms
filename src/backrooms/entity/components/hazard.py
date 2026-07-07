@@ -7,6 +7,7 @@ there is no hazard-kind-specific subclass hierarchy.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable
 
 from backrooms.constants import Color
@@ -18,6 +19,21 @@ if TYPE_CHECKING:
     from backrooms.entity.entity import Entity
 
 SPORE_DAMAGE_KIND = "spore_damage"
+
+
+@dataclass(frozen=True)
+class LootEntry:
+    """One possible debris-pile find and its relative weight within that
+    pile's own pool -- see make_debris_pile. `weight` is relative, not a
+    per-entry probability (unlike world.level_registry.SpawnEntry.weight,
+    which gates whether an entry is attempted at all): a pool of two
+    weight=1.0 entries and one weight=0.2 entry picks that third one roughly
+    1/5th as often as either of the other two, not "20% independent chance."
+    Lets the same item (e.g. a Simple Backpack) be common in one debris
+    pile's pool and rare in another's, without touching tick_debris_pile."""
+
+    factory: Callable[[], "Entity"]
+    weight: float = 1.0
 
 
 class HazardComponent(BaseComponent):
@@ -54,7 +70,10 @@ def tick_spore_damage(entity: "Entity", engine: "Engine") -> None:
 
     # A worn face-slot item (see EquippableComponent.spore_resistance, e.g.
     # the crafted Mask) blunts this specifically -- a respiratory hazard, not
-    # a generic one -- rather than a blanket damage-reduction stat.
+    # a generic one -- rather than a blanket damage-reduction stat. This is
+    # the single-slot equip-effect pattern (see EquipmentComponent's own
+    # docstring for when to use this vs. a pool-wide summed method like
+    # capacity_bonus).
     mask = player.equipment.slots.get("face") if player.equipment is not None else None
     spore_resistance = mask.equippable.spore_resistance if mask is not None and mask.equippable is not None else 0.0
     severity = entity.hazard.severity * (1.0 - spore_resistance)
@@ -100,8 +119,9 @@ def tick_debris_pile(entity: "Entity", engine: "Engine") -> None:
 
     data = entity.hazard.data
     if engine.rng.random() < data["good_chance"]:
-        item_factory = engine.rng.choice(data["item_factories"])
-        item = item_factory()
+        entries: tuple[LootEntry, ...] = data["item_factories"]
+        entry = engine.rng.choices(entries, weights=[e.weight for e in entries], k=1)[0]
+        item = entry.factory()
         item.place(entity.x, entity.y)
         engine.game_map.entities.add(item)
         engine.message_log.add_message("You dig through the debris and find something useful.", color=Color.WHITE)
@@ -126,11 +146,13 @@ def make_unstable_floor(*, collapse_threshold: int = 4, event_flag: str = "floor
 
 
 def make_debris_pile(
-    *, item_factories: tuple[Callable[[], "Entity"], ...], good_chance: float = 0.6, sanity_penalty: float = 10.0
+    *, item_factories: tuple[LootEntry, ...], good_chance: float = 0.6, sanity_penalty: float = 10.0
 ) -> HazardComponent:
-    """`item_factories` is a pool, not a single fixed item -- one is picked
-    at random on a good outcome, so a debris pile can turn up any of several
-    different possible finds instead of always the same one."""
+    """`item_factories` is a weighted pool, not a single fixed item -- one
+    LootEntry is picked per its weight on a good outcome, so a debris pile
+    can turn up any of several different possible finds instead of always
+    the same one, and different debris piles can weight the same item
+    differently (see LootEntry)."""
     return HazardComponent(
         "debris_pile",
         tick_debris_pile,

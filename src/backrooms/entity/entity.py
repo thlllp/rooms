@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from backrooms.entity.components.ai import BaseAI
+    from backrooms.entity.components.attributes import AttributesComponent
     from backrooms.entity.components.consumable import ConsumableComponent
     from backrooms.entity.components.dialogue import DialogueComponent
     from backrooms.entity.components.equipment import EquipmentComponent
@@ -51,6 +52,7 @@ class Entity:
         causes_dread: bool = False,
         dread_radius: int = 0,
         ai: "BaseAI | None" = None,
+        attributes: "AttributesComponent | None" = None,
         fighter: "Fighter | None" = None,
         inventory: "Inventory | None" = None,
         sanity: "SanityComponent | None" = None,
@@ -99,6 +101,7 @@ class Entity:
         # components in a second place.
         components: dict[str, object | None] = {
             "ai": ai,
+            "attributes": attributes,
             "fighter": fighter,
             "inventory": inventory,
             "sanity": sanity,

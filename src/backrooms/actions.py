@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from backrooms.constants import Color
+from backrooms.entity.components.attributes import attribute_value
 from backrooms.entity.entity import RenderOrder
 from backrooms.world.crafting import CRAFTING_RECIPES
 from backrooms.world.level_registry import LEVEL_REGISTRY, LEVEL_STYLES
@@ -92,6 +93,16 @@ class ToggleLightAction(Action):
             engine.message_log.add_message("You switch off your light.", color=Color.GREY)
 
 
+def _effective_capacity(player: "Entity") -> int:
+    """Inventory.capacity plus whatever equipped gear adds (e.g. a back-slot
+    backpack) -- computed fresh rather than mutating Inventory.capacity on
+    equip/unequip, so it can never drift out of sync with what's actually
+    worn. Shared by PickupAction and UseItemAction's un-equip path, the two
+    places something can be added to held inventory."""
+    bonus = player.equipment.capacity_bonus() if player.equipment is not None else 0
+    return player.inventory.capacity + bonus
+
+
 class PickupAction(Action):
     def perform(self, engine: "Engine") -> None:
         player = self.entity
@@ -105,7 +116,7 @@ class PickupAction(Action):
             self.costs_turn = False
             engine.message_log.add_message("There's nothing here to pick up.", color=Color.GREY)
             return
-        if len(player.inventory.items) >= player.inventory.capacity:
+        if len(player.inventory.items) >= _effective_capacity(player):
             self.costs_turn = False
             engine.message_log.add_message("You can't carry anything else.", color=Color.WARNING)
             return
@@ -206,9 +217,27 @@ class UseItemAction(Action):
         if self.slot_index < len(held):
             item = held[self.slot_index]
             if item.equippable is not None:
-                held.remove(item)
                 slot = item.equippable.slot
                 previous = player.equipment.slots[slot]
+                # A straight swap (item out of held, previous back into held)
+                # never changes held's SIZE by more than the +1/-1 of
+                # `previous` existing or not -- but if `item`'s own
+                # capacity_bonus is smaller than whatever it displaces (e.g.
+                # swapping a Hiking Bag +10 for a Simple Backpack +5),
+                # capacity itself shrinks the instant this equip completes.
+                # Check the post-swap fit against the post-swap capacity
+                # before committing, not the current (possibly
+                # backpack-inflated) capacity.
+                previous_bonus = previous.equippable.capacity_bonus if previous is not None else 0
+                capacity_after_swap = _effective_capacity(player) - previous_bonus + item.equippable.capacity_bonus
+                held_after_swap = len(held) - 1 + (1 if previous is not None else 0)
+                if held_after_swap > capacity_after_swap:
+                    engine.message_log.add_message(
+                        "You don't have room to stow what that would displace.", color=Color.GREY
+                    )
+                    self.costs_turn = False
+                    return
+                held.remove(item)
                 player.equipment.slots[slot] = item
                 if previous is not None:
                     held.append(previous)
@@ -220,7 +249,13 @@ class UseItemAction(Action):
             return
 
         item = equipped[self.slot_index - len(held)]
-        if len(held) >= player.inventory.capacity:
+        # If `item` itself grants a capacity bonus (a back-slot backpack),
+        # removing it takes that bonus with it -- capacity_after_removal
+        # reflects the capacity the player will actually have the instant
+        # after this un-equip, not the (possibly higher, backpack-inflated)
+        # capacity they have right now.
+        capacity_after_removal = _effective_capacity(player) - item.equippable.capacity_bonus
+        if len(held) >= capacity_after_removal:
             engine.message_log.add_message("Your inventory is full.", color=Color.GREY)
             self.costs_turn = False
             return
@@ -274,7 +309,15 @@ class MovementAction(Action):
         a wandering entity bumping the world boundary is just a wall to it.
         Also records *which* wall was crossed (engine.pending_edge_wall) --
         a STABLE level uses this to know which neighboring zone to enter
-        (see Engine.load_level)."""
+        (see Engine.load_level).
+
+        If the player is standing exactly on this zone's
+        GameMap.exit_hallway_position (see LevelDefinition.has_exit_hallway/
+        generator_office._place_exit_hallway), sets "exit_hallway_crossed"
+        INSTEAD of the usual "map_edge_exited" -- deliberately mutually
+        exclusive, so this level's own TransitionRule for that flag decides
+        where the hallway leads, deterministically, without the generic
+        per-edge-crossing rule ever competing for the same turn."""
         if self.entity is not engine.player:
             return
         level_def = LEVEL_REGISTRY[engine.current_level_id]
@@ -294,7 +337,29 @@ class MovementAction(Action):
             wall = "bottom"
 
         engine.pending_edge_wall = wall
-        engine.event_flags.add("map_edge_exited")
+        if (self.entity.x, self.entity.y) == game_map.exit_hallway_position:
+            engine.event_flags.add("exit_hallway_crossed")
+        else:
+            engine.event_flags.add("map_edge_exited")
+
+
+BASE_HIT_CHANCE = 0.85
+HIT_CHANCE_PER_DEX_DELTA = 0.03
+MIN_HIT_CHANCE = 0.5
+MAX_HIT_CHANCE = 0.95
+
+
+def _hit_chance(attacker: "Entity", defender: "Entity") -> float:
+    """One roll captures both halves of dexterity's job: a higher-dex
+    attacker hits more often, a higher-dex defender lowers the attacker's
+    effective hit chance -- i.e. dodges more. A miss here IS a dodge from
+    the defender's side; there's no separate dodge roll on top of this.
+    Entities without an AttributesComponent (every NPC today -- Hollow,
+    Wanderer, ... -- see data/registrations.py) are treated as baseline
+    dexterity via attribute_value, rather than giving them a whole
+    component just for this one number."""
+    delta = attribute_value(attacker, "dexterity") - attribute_value(defender, "dexterity")
+    return max(MIN_HIT_CHANCE, min(MAX_HIT_CHANCE, BASE_HIT_CHANCE + delta * HIT_CHANCE_PER_DEX_DELTA))
 
 
 class AttackAction(Action):
@@ -329,6 +394,10 @@ class AttackAction(Action):
         power = attacker.fighter.power if attacker.fighter is not None else 0
         if power <= 0:
             engine.message_log.add_message(f"{attacker.name} bumps into {target.name}, harmlessly.", color=Color.GREY)
+            return
+
+        if engine.rng.random() >= _hit_chance(attacker, target):
+            engine.message_log.add_message(f"{attacker.name} attacks {target.name}, but misses.", color=Color.GREY)
             return
 
         applied = target.fighter.take_damage(power)

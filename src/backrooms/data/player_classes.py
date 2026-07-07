@@ -9,6 +9,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from backrooms.constants import Color
+from backrooms.entity.components.attributes import (
+    BASELINE_ATTRIBUTE,
+    AttributesComponent,
+    endurance_mitigation_from_endurance,
+    max_hp_from_endurance,
+    max_sanity_from_willpower,
+    power_from_strength,
+    willpower_mitigation_from_willpower,
+)
 from backrooms.entity.components.equipment import EquipmentComponent
 from backrooms.entity.components.experience import ExperienceComponent
 from backrooms.entity.components.fighter import Fighter
@@ -21,12 +30,11 @@ from backrooms.entity.components.sanity import SanityComponent
 from backrooms.entity.entity import Entity, RenderOrder
 
 # Shared baseline every class starts from -- a class only overrides the one
-# or two stats that make it distinct (see PLAYER_CLASSES below).
-BASE_HP = 20
-BASE_ENDURANCE = 1
-BASE_POWER = 1
-BASE_MAX_SANITY = 100
-BASE_WILLPOWER = 0.3
+# or two attributes that make it distinct (see PLAYER_CLASSES below). Tied
+# to AttributesComponent's own baseline so PlayerClass's defaults and "no
+# AttributesComponent at all" NPC fallback (attributes.attribute_value)
+# always mean the same number for the same reason.
+BASE_ATTRIBUTE = BASELINE_ATTRIBUTE
 BASE_QUICKNESS = 1.0
 
 
@@ -36,8 +44,11 @@ class PlayerClass:
     display_name: str
     description: str
     quickness: float = BASE_QUICKNESS
-    max_sanity: int = BASE_MAX_SANITY
-    willpower: float = BASE_WILLPOWER
+    endurance: int = BASE_ATTRIBUTE
+    willpower: int = BASE_ATTRIBUTE
+    dexterity: int = BASE_ATTRIBUTE
+    strength: int = BASE_ATTRIBUTE
+    luck: int = BASE_ATTRIBUTE
 
 
 PLAYER_CLASSES: tuple[PlayerClass, ...] = (
@@ -51,13 +62,19 @@ PLAYER_CLASSES: tuple[PlayerClass, ...] = (
         id="sturdy",
         display_name="Sturdy",
         description="Steadier nerves -- your grip on this place slips slower.",
-        max_sanity=120,
-        willpower=0.5,
+        willpower=8,
     ),
 )
 
 
 def build_player(player_class: PlayerClass) -> Entity:
+    attributes = AttributesComponent(
+        endurance=player_class.endurance,
+        willpower=player_class.willpower,
+        dexterity=player_class.dexterity,
+        strength=player_class.strength,
+        luck=player_class.luck,
+    )
     return Entity(
         0,
         0,
@@ -66,10 +83,18 @@ def build_player(player_class: PlayerClass) -> Entity:
         name="Player",
         blocks_movement=True,
         render_order=RenderOrder.PLAYER,
+        attributes=attributes,
         # Slight starting defenses: endurance blunts physical hazard damage,
         # willpower blunts sanity drain -- neither negates it outright.
-        fighter=Fighter(hp=BASE_HP, endurance=BASE_ENDURANCE, power=BASE_POWER),
-        sanity=SanityComponent(max_sanity=player_class.max_sanity, willpower=player_class.willpower),
+        fighter=Fighter(
+            hp=max_hp_from_endurance(attributes.endurance),
+            endurance=endurance_mitigation_from_endurance(attributes.endurance),
+            power=power_from_strength(attributes.strength),
+        ),
+        sanity=SanityComponent(
+            max_sanity=max_sanity_from_willpower(attributes.willpower),
+            willpower=willpower_mitigation_from_willpower(attributes.willpower),
+        ),
         light_source=LightSourceComponent(max_fuel=300.0, radius=6, burn_rate=1.0, is_lit=False),
         perception=PerceptionComponent(acuity=1),
         experience=ExperienceComponent(),

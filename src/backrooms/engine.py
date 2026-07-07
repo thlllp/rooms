@@ -224,6 +224,14 @@ class Engine:
                 sign.place(*tile)
                 game_map.entities.add(sign)
 
+        if game_map.inn_room_center is not None:
+            for factory in level_def.inn_furniture_factories:
+                tile = random_walkable_tile_near(game_map, self.rng, game_map.inn_room_center, 2)
+                if tile is not None:
+                    furniture = factory()
+                    furniture.place(*tile)
+                    game_map.entities.add(furniture)
+
         return game_map
 
     def _non_trigger_position(

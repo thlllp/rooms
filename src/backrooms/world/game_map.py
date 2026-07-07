@@ -40,6 +40,16 @@ class GameMap:
         # Engine._generate_map to drop a Sign next to it, since the
         # generator only builds tiles, not entities.
         self.settlement_door_position: tuple[int, int] | None = None
+        # Same idea, for generate_office_level._place_inn (see
+        # LevelDefinition.inn_floor_tile) -- consumed by Engine._generate_map
+        # to spawn LevelDefinition.inn_furniture_factories near it.
+        self.inn_room_center: tuple[int, int] | None = None
+        # Set by generate_office_level._place_exit_hallway when
+        # LevelDefinition.has_exit_hallway is set -- the exact tile at the
+        # hallway's far end, consumed by actions.MovementAction._handle_edge
+        # to tell "stepped off the map via the hallway" apart from any other
+        # edge crossing on this same level.
+        self.exit_hallway_position: tuple[int, int] | None = None
 
     def in_bounds(self, x: int, y: int) -> bool:
         return 0 <= x < self.width and 0 <= y < self.height

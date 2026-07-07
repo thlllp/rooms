@@ -62,6 +62,14 @@ class Color:
     INN_FLOOR_DARK = (30, 20, 12)
     INN_FLOOR_LIT = (180, 130, 70)
 
+    # Level 3's "pipeworks" look -- brown tile flooring, walls a muted
+    # grey/brown amalgamation (neither the office levels' wallpaper nor the
+    # garage's flat concrete grey).
+    PIPEWORKS_WALL_DARK = (28, 24, 20)
+    PIPEWORKS_WALL_LIT = (95, 82, 68)
+    PIPEWORKS_FLOOR_DARK = (32, 20, 12)
+    PIPEWORKS_FLOOR_LIT = (140, 95, 55)
+
     PLAYER = (230, 230, 200)
 
     MESSAGE_LOG = (200, 200, 200)

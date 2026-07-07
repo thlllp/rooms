@@ -2,6 +2,7 @@ import random
 
 from backrooms.entity.components.fighter import Fighter
 from backrooms.entity.components.hazard import (
+    LootEntry,
     make_debris_pile,
     make_spore_zone,
     make_unstable_floor,
@@ -141,7 +142,7 @@ def test_debris_pile_grants_item_on_good_outcome():
         color=(0, 0, 0),
         name="Debris Pile",
         render_order=RenderOrder.HAZARD,
-        hazard=make_debris_pile(item_factories=(_spawn_loot,), good_chance=1.0, sanity_penalty=10.0),
+        hazard=make_debris_pile(item_factories=(LootEntry(_spawn_loot),), good_chance=1.0, sanity_penalty=10.0),
     )
     engine = FakeEngine(player)
     engine.game_map.entities.add(pile)
@@ -163,7 +164,7 @@ def test_debris_pile_drains_sanity_on_bad_outcome():
         color=(0, 0, 0),
         name="Debris Pile",
         render_order=RenderOrder.HAZARD,
-        hazard=make_debris_pile(item_factories=(_spawn_loot,), good_chance=0.0, sanity_penalty=15.0),
+        hazard=make_debris_pile(item_factories=(LootEntry(_spawn_loot),), good_chance=0.0, sanity_penalty=15.0),
     )
     engine = FakeEngine(player)
     engine.game_map.entities.add(pile)
@@ -184,7 +185,7 @@ def test_debris_pile_does_nothing_until_player_steps_on_it():
         color=(0, 0, 0),
         name="Debris Pile",
         render_order=RenderOrder.HAZARD,
-        hazard=make_debris_pile(item_factories=(_spawn_loot,), good_chance=1.0),
+        hazard=make_debris_pile(item_factories=(LootEntry(_spawn_loot),), good_chance=1.0),
     )
     engine = FakeEngine(player)
     engine.game_map.entities.add(pile)

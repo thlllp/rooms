@@ -167,3 +167,22 @@ INN_FLOOR = new_tile(
     light=(ord(" "), Color.WHITE, Color.INN_FLOOR_LIT),
     tile_id="inn_floor",
 )
+
+# Level 3's "pipeworks" reskin of WALL/FLOOR -- same shape/tile_id semantics
+# as GARAGE_WALL/GARAGE_FLOOR, just a brown-tile floor and a wall that's a
+# grey/brown amalgamation instead of the garage's flat concrete grey.
+PIPEWORKS_WALL = new_tile(
+    walkable=False,
+    transparent=False,
+    dark=(ord(" "), Color.WHITE, Color.PIPEWORKS_WALL_DARK),
+    light=(ord(" "), Color.WHITE, Color.PIPEWORKS_WALL_LIT),
+    tile_id="pipeworks_wall",
+)
+
+PIPEWORKS_FLOOR = new_tile(
+    walkable=True,
+    transparent=True,
+    dark=(ord(" "), Color.WHITE, Color.PIPEWORKS_FLOOR_DARK),
+    light=(ord(" "), Color.WHITE, Color.PIPEWORKS_FLOOR_LIT),
+    tile_id="pipeworks_floor",
+)

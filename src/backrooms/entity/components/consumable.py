@@ -65,3 +65,29 @@ def make_hp_for_sanity_item(*, hp_amount: float = 20.0, sanity_cost: float = 10.
         )
 
     return ConsumableComponent(_use)
+
+
+def make_hunger_restore_item(amount: float = 35.0) -> ConsumableComponent:
+    def _use(user: "Entity", engine: "Engine") -> None:
+        if user.hunger is None:
+            engine.message_log.add_message("Nothing seems to happen.", color=Color.GREY)
+            return
+        before = user.hunger.current
+        user.hunger.restore(amount)
+        gained = user.hunger.current - before
+        engine.message_log.add_message(f"You eat. (+{gained:.0f} hunger)", color=Color.HUNGER_BAR_FULL)
+
+    return ConsumableComponent(_use)
+
+
+def make_fuel_restore_item(amount: float = 50.0) -> ConsumableComponent:
+    def _use(user: "Entity", engine: "Engine") -> None:
+        if user.light_source is None:
+            engine.message_log.add_message("Nothing seems to happen.", color=Color.GREY)
+            return
+        before = user.light_source.fuel
+        user.light_source.restore(amount)
+        gained = user.light_source.fuel - before
+        engine.message_log.add_message(f"You refuel your light. (+{gained:.0f} fuel)", color=Color.FUEL_BAR_FULL)
+
+    return ConsumableComponent(_use)
