@@ -158,9 +158,22 @@ def tick_debris_pile(entity: "Entity", engine: "Engine") -> None:
         entries: tuple[LootEntry, ...] = data["item_factories"]
         entry = engine.rng.choices(entries, weights=[e.weight for e in entries], k=1)[0]
         item = entry.factory()
-        item.place(entity.x, entity.y)
-        engine.game_map.entities.add(item)
-        engine.message_log.add_message("You dig through the debris and find something useful.", color=Color.WHITE)
+        # Put the find straight into the pack rather than dropping it on the
+        # tile the player is already standing on -- there it renders hidden
+        # under the player and reads as "the message lied, nothing appeared."
+        # Fall back to the floor only when there's genuinely no room (capacity
+        # mirrors actions._effective_capacity: base plus any worn backpack).
+        inventory = player.inventory
+        bonus = player.equipment.capacity_bonus() if player.equipment is not None else 0
+        if inventory is not None and len(inventory.items) < inventory.capacity + bonus:
+            inventory.items.append(item)
+            engine.message_log.add_message(f"You dig through the debris and find a {item.name}.", color=Color.WHITE)
+        else:
+            item.place(entity.x, entity.y)
+            engine.game_map.entities.add(item)
+            engine.message_log.add_message(
+                f"You find a {item.name}, but your pack is full -- it's at your feet.", color=Color.WHITE
+            )
     else:
         if player.sanity is not None:
             player.sanity.drain(entity.hazard.severity)
