@@ -33,6 +33,24 @@ def _random_walkable_tile(game_map: GameMap, rng: random.Random) -> tuple[int, i
     return rng.choice(walkable_coords)
 
 
+def _random_wall_adjacent_tile(game_map: GameMap, rng: random.Random) -> tuple[int, int] | None:
+    """Same exclusions as _random_walkable_tile, further restricted to tiles
+    with at least one non-walkable tile orthogonally next to them -- for
+    SpawnEntry.near_wall fixtures (radiator-style heaters) that should read
+    as mounted against a wall rather than floating in open floor."""
+    candidates = [
+        (x, y)
+        for x in range(game_map.width)
+        for y in range(game_map.height)
+        if game_map.tiles["walkable"][x, y]
+        and not any(game_map.entities_at(x, y))
+        and any(not game_map.is_walkable(x + dx, y + dy) for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)))
+    ]
+    if not candidates:
+        return None
+    return rng.choice(candidates)
+
+
 def random_walkable_tile_near(
     game_map: GameMap, rng: random.Random, center: tuple[int, int], radius: int, *, exclude: tuple[int, int] | None = None
 ) -> tuple[int, int] | None:
@@ -67,7 +85,9 @@ def spawn_from_table(
         for _ in range(count):
             if rng.random() > entry.weight:
                 continue
-            if entry.cluster_radius is not None and anchor is not None:
+            if entry.near_wall:
+                tile = _random_wall_adjacent_tile(game_map, rng)
+            elif entry.cluster_radius is not None and anchor is not None:
                 tile = random_walkable_tile_near(game_map, rng, anchor, entry.cluster_radius)
             else:
                 tile = _random_walkable_tile(game_map, rng)

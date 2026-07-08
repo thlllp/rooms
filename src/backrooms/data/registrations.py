@@ -104,8 +104,13 @@ def _spawn_weak_floor() -> Entity:
 
 # Level 1.22's signature environmental hazard (see LEVEL_1_22 / the Backrooms
 # "Fully Remodeled" level it's based on): a heater that's spontaneously caught
-# fire. Tile-anchored radius burn -- pure physical damage, no mask resistance
-# (see hazard.tick_proximity_damage), unlike the respiratory Spore Cloud.
+# fire. Tile-anchored radius burn -- pure physical damage, no mask resistance,
+# unlike the respiratory Spore Cloud. Bursts on a random clock rather than
+# burning constantly: a safe grace period after each burst, then a rolling
+# chance to go off again every turn after that (see hazard.tick_heater_burst).
+# Its tile darkens toward pink while it's live, so the danger window is
+# visible before it happens. Spawned near_wall (see SpawnEntry) since a
+# radiator-style heater reads as wall-mounted, not freestanding.
 def _spawn_faulty_heater() -> Entity:
     return Entity(
         0,
@@ -899,7 +904,7 @@ LEVEL_1_22 = register(
         # little scavenged loot left behind in the debris.
         spawn_table=(),
         hazard_table=(
-            SpawnEntry(factory=_spawn_faulty_heater, weight=1.0, min_count=1, max_count=3),
+            SpawnEntry(factory=_spawn_faulty_heater, weight=1.0, min_count=1, max_count=3, near_wall=True),
             SpawnEntry(factory=_spawn_weak_floor, weight=1.0, min_count=1, max_count=2),
             SpawnEntry(factory=_spawn_debris_pile_office, weight=1.0, min_count=1, max_count=1),
         ),

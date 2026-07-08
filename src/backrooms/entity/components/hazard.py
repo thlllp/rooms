@@ -105,8 +105,8 @@ def tick_proximity_damage(entity: "Entity", engine: "Engine") -> None:
     tick_spore_damage but purely physical: no face-slot mask resistance (this
     isn't a respiratory hazard) and no sanity component. The flavor line comes
     from `data["message"]` so one tick serves every "stand near it and it
-    hurts" hazard (combusting heaters, lurching walls, ...) without a
-    near-identical copy per kind."""
+    hurts" hazard (lurching walls, ...) without a near-identical copy per
+    kind."""
     if not _player_in_radius(entity, engine):
         return
     player = engine.player
@@ -114,6 +114,53 @@ def tick_proximity_damage(entity: "Entity", engine: "Engine") -> None:
     if player.fighter is not None:
         player.fighter.take_damage(entity.hazard.severity)
         engine.message_log.add_message(entity.hazard.data.get("message", "It hurts."), color=Color.HAZARD)
+        # Hazard damage can kill the player same as combat -- route through
+        # the same kill_entity path, or game_over never gets set.
+        if player.fighter.hp <= 0:
+            engine.kill_entity(player)
+
+
+def _danger_shade(color: tuple[int, int, int]) -> tuple[int, int, int]:
+    """Darkens `color` and pushes it toward pink/red -- the "about to go off"
+    warning tint for tick_heater_burst's live phase. Boosts red and blue
+    relative to green so an orange heater reads as a dull magenta rather than
+    just dimming uniformly."""
+    r, g, b = color
+    return (min(255, int(r * 0.6 + 40)), int(g * 0.35), min(255, int(b * 0.6 + 40)))
+
+
+def tick_heater_burst(entity: "Entity", engine: "Engine") -> None:
+    """Combusting heater: after a burst it's dormant (`data["grace_period"]`
+    turns, default 7) with no risk at all, then goes "live" -- every turn
+    after that has a `data["burst_chance"]` (default 25%) chance to burst
+    again. This is the heater's own clock: it advances every turn regardless
+    of the player's position, same as the radius check below only gates
+    whether a burst actually hurts the player, not whether the clock ticks.
+    While live, the entity's color shifts to a darker, pinker shade (see
+    _danger_shade) as a visible warning; it reverts the instant a burst
+    resets the grace timer."""
+    data = entity.hazard.data
+    if "base_color" not in data:
+        data["base_color"] = entity.color
+
+    if data.get("grace_remaining", 0) > 0:
+        data["grace_remaining"] -= 1
+        entity.color = data["base_color"]
+        return
+
+    entity.color = _danger_shade(data["base_color"])
+    if engine.rng.random() >= data.get("burst_chance", 0.25):
+        return  # rolled safe -- stays live and keeps rolling next turn
+
+    data["grace_remaining"] = data.get("grace_period", 7)
+    entity.color = data["base_color"]
+
+    if not _player_in_radius(entity, engine):
+        return
+    player = engine.player
+    if player.fighter is not None:
+        player.fighter.take_damage(entity.hazard.severity)
+        engine.message_log.add_message(data.get("message", "It bursts."), color=Color.HAZARD)
         # Hazard damage can kill the player same as combat -- route through
         # the same kill_entity path, or game_over never gets set.
         if player.fighter.hp <= 0:
@@ -187,12 +234,22 @@ def make_spore_zone(*, radius: int = 1, severity: float = 2.0) -> HazardComponen
     return HazardComponent(SPORE_DAMAGE_KIND, tick_spore_damage, severity=severity, data={"radius": radius})
 
 
-def make_heat_zone(*, radius: int = 1, severity: float = 3.0) -> HazardComponent:
+def make_heat_zone(
+    *, radius: int = 1, severity: float = 3.0, grace_period: int = 7, burst_chance: float = 0.25
+) -> HazardComponent:
+    """Bursts on a random clock rather than constantly -- `grace_period` safe
+    turns after each burst, then a `burst_chance` roll every turn after that
+    until one hits (see tick_heater_burst)."""
     return HazardComponent(
         "heat_damage",
-        tick_proximity_damage,
+        tick_heater_burst,
         severity=severity,
-        data={"radius": radius, "message": "The heat sears you."},
+        data={
+            "radius": radius,
+            "message": "The heater bursts, and the heat sears you.",
+            "grace_period": grace_period,
+            "burst_chance": burst_chance,
+        },
     )
 
 

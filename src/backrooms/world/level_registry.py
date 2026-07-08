@@ -191,6 +191,11 @@ class SpawnEntry:
     # SpawnEntry describe a clustered "encampment" of NPCs rather than
     # scattered individuals. See spawner.spawn_from_table.
     cluster_radius: int | None = None
+    # Restricts placement to walkable tiles with a wall orthogonally
+    # adjacent -- for fixtures that read as wall-mounted (radiator-style
+    # heaters) rather than freestanding in open floor. See
+    # spawner._random_wall_adjacent_tile.
+    near_wall: bool = False
 
 
 @dataclass(frozen=True)

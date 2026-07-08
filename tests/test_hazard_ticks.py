@@ -4,9 +4,13 @@ from backrooms.entity.components.fighter import Fighter
 from backrooms.entity.components.hazard import (
     LootEntry,
     make_debris_pile,
+    make_heat_zone,
+    make_impact_zone,
     make_spore_zone,
     make_unstable_floor,
     tick_debris_pile,
+    tick_heater_burst,
+    tick_proximity_damage,
     tick_spore_damage,
     tick_unstable_floor,
 )
@@ -222,6 +226,119 @@ def test_debris_pile_does_nothing_until_player_steps_on_it():
 
     assert pile in engine.game_map.entities
     assert player.sanity.current == 100
+
+
+class _ScriptedRng:
+    """Feeds fixed .random() results in order -- lets a heater's burst roll
+    be pinned to "safe" or "burst" instead of depending on real randomness."""
+
+    def __init__(self, values):
+        self._values = list(values)
+
+    def random(self):
+        return self._values.pop(0)
+
+
+def test_heater_bursts_then_stays_dormant_through_its_grace_period():
+    player = _make_player(fighter=Fighter(hp=100))
+    player.place(5, 5)
+    base_color = (230, 110, 40)
+    heater = Entity(
+        5,
+        6,
+        char="&",
+        color=base_color,
+        name="Combusting Heater",
+        render_order=RenderOrder.HAZARD,
+        hazard=make_heat_zone(radius=1, severity=5.0, grace_period=3, burst_chance=1.0),
+    )
+    engine = FakeEngine(player)
+
+    # Starts live (no prior burst to be dormant from) -- bursts immediately
+    # since burst_chance=1.0, then reverts to its base color.
+    tick_heater_burst(heater, engine)
+    assert player.fighter.hp == 95
+    assert heater.color == base_color
+
+    # Three dormant grace turns: no damage, no color change.
+    for _ in range(3):
+        tick_heater_burst(heater, engine)
+    assert player.fighter.hp == 95
+    assert heater.color == base_color
+
+    # Grace elapsed -- live again, and bursts again immediately.
+    tick_heater_burst(heater, engine)
+    assert player.fighter.hp == 90
+
+
+def test_heater_shows_danger_color_while_live_and_rolling_before_bursting():
+    player = _make_player(fighter=Fighter(hp=100))
+    player.place(5, 5)
+    base_color = (230, 110, 40)
+    heater = Entity(
+        5,
+        6,
+        char="&",
+        color=base_color,
+        name="Combusting Heater",
+        render_order=RenderOrder.HAZARD,
+        hazard=make_heat_zone(radius=1, severity=5.0, grace_period=7, burst_chance=0.25),
+    )
+    engine = FakeEngine(player)
+    engine.rng = _ScriptedRng([0.9, 0.9, 0.1])  # two safe rolls, then a burst
+
+    tick_heater_burst(heater, engine)
+    assert player.fighter.hp == 100  # rolled safe
+    assert heater.color != base_color  # darker/pinker while live and rolling
+
+    tick_heater_burst(heater, engine)
+    assert player.fighter.hp == 100  # rolled safe again
+    assert heater.color != base_color
+
+    tick_heater_burst(heater, engine)
+    assert player.fighter.hp == 95  # this roll bursts
+    assert heater.color == base_color  # reverts once dormant again
+    assert heater.hazard.data["grace_remaining"] == 7
+
+
+def test_heater_burst_resets_clock_even_when_player_out_of_radius():
+    player = _make_player(fighter=Fighter(hp=100))
+    player.place(0, 0)
+    heater = Entity(
+        5,
+        5,
+        char="&",
+        color=(230, 110, 40),
+        name="Combusting Heater",
+        render_order=RenderOrder.HAZARD,
+        hazard=make_heat_zone(radius=1, severity=5.0, grace_period=7, burst_chance=1.0),
+    )
+    engine = FakeEngine(player)
+
+    tick_heater_burst(heater, engine)
+
+    assert player.fighter.hp == 100  # too far away to be hurt
+    assert heater.hazard.data["grace_remaining"] == 7  # clock still resets
+
+
+def test_impact_zone_stays_always_on():
+    player = _make_player(fighter=Fighter(hp=100))
+    player.place(5, 5)
+    wall = Entity(
+        5,
+        6,
+        char="#",
+        color=(0, 0, 0),
+        name="Shifting Wall",
+        render_order=RenderOrder.HAZARD,
+        hazard=make_impact_zone(radius=1, severity=4.0),
+    )
+    engine = FakeEngine(player)
+
+    for _ in range(3):
+        tick_proximity_damage(wall, engine)
+
+    assert player.fighter.hp == 88  # every tick still deals damage, no cycling
 
 
 def test_unstable_floor_only_counts_steps_while_player_present():
