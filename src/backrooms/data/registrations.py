@@ -16,6 +16,7 @@ from backrooms.entity.components.consumable import (
     make_hunger_restore_item,
     make_sanity_restore_item,
 )
+from backrooms.entity.components.container import ContainerComponent
 from backrooms.entity.components.dialogue import DialogueComponent
 from backrooms.entity.components.equippable import EquippableComponent
 from backrooms.entity.components.fighter import Fighter
@@ -28,6 +29,8 @@ from backrooms.entity.components.hazard import (
     make_twilight_zone,
     make_unstable_floor,
 )
+from backrooms.entity.components.salvageable import SalvageableComponent
+from backrooms.entity.components.tool import make_fabric_cutter, make_sewing_kit
 from backrooms.entity.entity import Entity, RenderOrder
 from backrooms.procgen.generator_office import generate_office_level
 from backrooms.world import tile_types
@@ -289,11 +292,15 @@ def _spawn_lighter_fluid() -> Entity:
 
 # Crafted, not found -- see the recipe registered below. Face-slot
 # equipment: full protection against spore damage/sanity drain while worn
-# (see hazard.tick_spore_damage), no effect on anything else.
+# (see hazard.tick_spore_damage), no effect on anything else. contains_fabric
+# marks it cloth, same as the found clothing below -- Scissors (see
+# make_fabric_cutter) can cut it back down into a Rag if you'd rather have
+# the crafting ingredient back than the mask.
 def _spawn_mask() -> Entity:
     return Entity(
         0, 0, char="[", color=(90, 90, 100), name="Mask", render_order=RenderOrder.ITEM,
         equippable=EquippableComponent(slot="face", spore_resistance=1.0),
+        contains_fabric=True,
     )
 
 
@@ -303,11 +310,13 @@ register_recipe(CraftingRecipe(name="Mask", ingredients=("Duct Tape", "Rag"), re
 # Back-slot equipment -- no passive protection, just extra carrying room
 # (see EquippableComponent.capacity_bonus/EquipmentComponent.capacity_bonus,
 # read by inventory.effective_capacity). Found in debris piles like any other
-# item, not crafted.
+# item, not crafted. contains_fabric=True -- canvas/nylon bags cut down into
+# a Rag same as any other cloth item (see make_fabric_cutter).
 def _spawn_simple_backpack() -> Entity:
     return Entity(
         0, 0, char="B", color=(120, 100, 70), name="Simple Backpack", render_order=RenderOrder.ITEM,
         equippable=EquippableComponent(slot="back", capacity_bonus=5),
+        contains_fabric=True,
     )
 
 
@@ -315,6 +324,143 @@ def _spawn_hiking_bag() -> Entity:
     return Entity(
         0, 0, char="H", color=(70, 110, 80), name="Hiking Bag", render_order=RenderOrder.ITEM,
         equippable=EquippableComponent(slot="back", capacity_bonus=10),
+        contains_fabric=True,
+    )
+
+
+# Plain found clothing -- chest/legs equipment with no passive effect at all,
+# unlike every other equippable above. Their only purpose right now is as
+# fabric source material: worn for flavor if you like, but mainly something
+# Scissors (see make_fabric_cutter) turns into a Rag. Several distinct named
+# items rather than one generic "Clothing" so debris piles turn up some
+# variety, same reasoning as LootEntry's docstring on varying finds.
+def _spawn_flannel_shirt() -> Entity:
+    return Entity(
+        0, 0, char="s", color=(150, 70, 60), name="Flannel Shirt", render_order=RenderOrder.ITEM,
+        equippable=EquippableComponent(slot="chest"), contains_fabric=True,
+    )
+
+
+def _spawn_cotton_tshirt() -> Entity:
+    return Entity(
+        0, 0, char="T", color=(200, 195, 185), name="Cotton T-Shirt", render_order=RenderOrder.ITEM,
+        equippable=EquippableComponent(slot="chest"), contains_fabric=True,
+    )
+
+
+def _spawn_faded_jeans() -> Entity:
+    return Entity(
+        0, 0, char="j", color=(70, 90, 130), name="Faded Jeans", render_order=RenderOrder.ITEM,
+        equippable=EquippableComponent(slot="legs"), contains_fabric=True,
+    )
+
+
+def _spawn_canvas_trousers() -> Entity:
+    return Entity(
+        0, 0, char="J", color=(150, 140, 100), name="Canvas Trousers", render_order=RenderOrder.ITEM,
+        equippable=EquippableComponent(slot="legs"), contains_fabric=True,
+    )
+
+
+# The tool itself -- reusable (see components.tool.ToolComponent: unlike a
+# consumable, using it doesn't remove it from inventory). Cuts whichever
+# fabric item (see contains_fabric above) comes first in inventory order
+# into a Rag. Found, not crafted -- an ordinary household tool.
+def _spawn_scissors() -> Entity:
+    return Entity(
+        0, 0, char="x", color=(180, 180, 190), name="Scissors", render_order=RenderOrder.ITEM,
+        tool=make_fabric_cutter(_spawn_rag),
+    )
+
+
+# Finite-charge tool -- see components.tool.make_sewing_kit. Not wired into
+# any recipe yet (see CraftingRecipe.required_tool) and not placed in any
+# spawn table -- just the item itself, ready for both once something
+# actually needs it.
+def _spawn_sewing_kit() -> Entity:
+    return Entity(
+        0, 0, char="k", color=(200, 190, 170), name="Sewing Kit", render_order=RenderOrder.ITEM,
+        tool=make_sewing_kit(max_uses=5),
+    )
+
+
+# Improvised melee weapons -- hand-slot equipment carrying power_bonus/
+# max_uses (see EquippableComponent/EquipmentComponent.power_bonus,
+# register_weapon_hit): a real damage boost over bare fists, but it
+# splinters apart after a handful of connecting hits rather than lasting
+# like a real weapon would. Found loose in debris same as anything else, or
+# wrenched off wooden furniture with enough strength (see
+# _spawn_wooden_chair/_spawn_wooden_table below).
+def _spawn_chair_leg() -> Entity:
+    return Entity(
+        0, 0, char="/", color=(150, 110, 70), name="Chair Leg", render_order=RenderOrder.ITEM,
+        equippable=EquippableComponent(slot="right_hand", power_bonus=2, max_uses=6),
+    )
+
+
+# Heavier than a Chair Leg -- hits harder (power_bonus=4 vs 2) but cracks
+# under its own force sooner (max_uses=4 vs 6). Also gated behind more
+# strength to salvage in the first place (see _spawn_wooden_table).
+def _spawn_table_leg() -> Entity:
+    return Entity(
+        0, 0, char="/", color=(110, 80, 50), name="Table Leg", render_order=RenderOrder.ITEM,
+        equippable=EquippableComponent(slot="right_hand", power_bonus=4, max_uses=4),
+    )
+
+
+# The prize inside a toolbox (see _spawn_toolbox) -- a proper hand weapon,
+# not an improvised one: hits harder than either furniture leg (power_bonus=5)
+# and lasts far longer (max_uses=15) before its magazine's spent. Rare in the
+# pool to match. Plain "Nails" are its thematic ammo/crafting stock, common in
+# the same box.
+def _spawn_nailgun() -> Entity:
+    return Entity(
+        0, 0, char="7", color=(210, 180, 60), name="Nailgun", render_order=RenderOrder.ITEM,
+        equippable=EquippableComponent(slot="right_hand", power_bonus=5, max_uses=15),
+    )
+
+
+# Plain crafting stock -- no component of its own, just a named material to
+# hold onto for a future recipe (same forward-looking placeholder role the
+# Sewing Kit fills for tool-gated crafting). The common filler of a toolbox.
+def _spawn_nails() -> Entity:
+    return Entity(0, 0, char=";", color=(170, 170, 180), name="Nails", render_order=RenderOrder.ITEM)
+
+
+# Wooden furniture with an actual leg worth salvaging -- unlike the purely
+# decorative Desk/Filing Cabinet below (metal, or nothing worth breaking
+# off), bumping into either while strong enough (see
+# SalvageableComponent/actions.SalvageAction) wrenches a leg free as an
+# improvised weapon instead of just blocking the way. strength_required=5
+# (baseline, see attributes.BASELINE_ATTRIBUTE) means any starting character
+# can already manage a chair; the heavier table needs one level's worth of
+# growth (see systems.experience_system.STRENGTH_PER_LEVEL).
+def _spawn_wooden_chair() -> Entity:
+    return Entity(
+        0, 0, char="C", color=(150, 110, 70), name="Wooden Chair", blocks_movement=True,
+        render_order=RenderOrder.HAZARD,
+        salvageable=SalvageableComponent(result_factory=_spawn_chair_leg, strength_required=5),
+    )
+
+
+def _spawn_wooden_table() -> Entity:
+    return Entity(
+        0, 0, char="w", color=(120, 85, 55), name="Wooden Table", blocks_movement=True,
+        render_order=RenderOrder.HAZARD,
+        salvageable=SalvageableComponent(result_factory=_spawn_table_leg, strength_required=10),
+    )
+
+
+# Feet-slot equipment -- full protection against the Hydrolitis Plague (see
+# systems/disease_system.py) while worn, same "full protection from one
+# specific hazard" shape as the Mask's spore_resistance. Only holds against
+# ordinary ankle-deep water; ZoneEffect.DEEP_WATER goes over the top of them
+# (see disease_system.process_diseases) -- ineffective there, not just
+# less effective. Found in debris like a backpack, not crafted.
+def _spawn_wading_boots() -> Entity:
+    return Entity(
+        0, 0, char="W", color=(90, 80, 60), name="Wading Boots", render_order=RenderOrder.ITEM,
+        equippable=EquippableComponent(slot="feet", flood_resistance=1.0),
     )
 
 
@@ -436,9 +582,22 @@ def _spawn_paint_bucket() -> Entity:
     )
 
 
+# Unlike the Paint Bucket and the office Desk/Filing Cabinet, a toolbox isn't
+# just an obstacle -- bumping it opens it (see ContainerComponent/
+# actions.OpenContainerAction) for one weighted-random tool. Nails are the
+# common filler; scissors turn up fairly often; a sewing kit less so; the
+# nailgun is the rare score (weights mirror how prized each is).
 def _spawn_toolbox() -> Entity:
     return Entity(
-        0, 0, char="t", color=(180, 60, 50), name="Toolbox", blocks_movement=True, render_order=RenderOrder.HAZARD
+        0, 0, char="t", color=(180, 60, 50), name="Toolbox", blocks_movement=True, render_order=RenderOrder.HAZARD,
+        container=ContainerComponent(
+            loot_pool=(
+                LootEntry(_spawn_nails),
+                LootEntry(_spawn_scissors, weight=0.7),
+                LootEntry(_spawn_sewing_kit, weight=0.4),
+                LootEntry(_spawn_nailgun, weight=0.1),
+            )
+        ),
     )
 
 
@@ -469,6 +628,28 @@ def _spawn_debris_pile_office() -> Entity:
                 # at all -- that one's exclusive to the garage's debris (see
                 # _spawn_debris_pile_garage).
                 LootEntry(_spawn_simple_backpack, weight=0.15),
+                # Plain found clothing -- as common as the everyday items
+                # above (Rag, Duct Tape, ...), just fabric source material
+                # for Scissors (see make_fabric_cutter) rather than a
+                # functional item.
+                LootEntry(_spawn_flannel_shirt),
+                LootEntry(_spawn_cotton_tshirt),
+                LootEntry(_spawn_faded_jeans),
+                LootEntry(_spawn_canvas_trousers),
+                # The tool that turns any of the above (or the Mask/backpacks)
+                # into a Rag -- less common than an ordinary find since it's
+                # reusable, not consumed.
+                LootEntry(_spawn_scissors, weight=0.3),
+                # Finite-charge crafting tool -- rarer still than Scissors,
+                # same "reusable, worth hanging onto" bucket. Also the prize
+                # inside a toolbox (see _spawn_toolbox).
+                LootEntry(_spawn_sewing_kit, weight=0.2),
+                # Improvised weapons, loose in the debris same as anywhere
+                # else they might turn up (see also _spawn_wooden_chair/
+                # _spawn_wooden_table's salvage route). Table Leg rarer than
+                # Chair Leg, matching its higher salvage strength gate.
+                LootEntry(_spawn_chair_leg, weight=0.2),
+                LootEntry(_spawn_table_leg, weight=0.1),
             ),
             good_chance=0.6,
             sanity_penalty=10.0,
@@ -641,6 +822,12 @@ LEVEL_1_OFFICE = register(
         furniture_table=(
             SpawnEntry(factory=_spawn_desk, weight=1.0, min_count=0, max_count=0),
             SpawnEntry(factory=_spawn_filing_cabinet, weight=1.0, min_count=0, max_count=0),
+            # Salvageable, unlike Desk/Filing Cabinet above (see
+            # _spawn_wooden_chair/_spawn_wooden_table's SalvageableComponent)
+            # -- an office break room's worth of ordinary furniture that
+            # happens to also be a source of improvised weapons.
+            SpawnEntry(factory=_spawn_wooden_chair, weight=1.0, min_count=0, max_count=0),
+            SpawnEntry(factory=_spawn_wooden_table, weight=1.0, min_count=0, max_count=0),
         ),
         transition_rules=(
             # Same weighting as level_0: an ordinary collapse usually just
@@ -721,11 +908,16 @@ LEVEL_2_GARAGE = register(
             SpawnEntry(factory=_spawn_hollow, weight=1.0, min_count=1, max_count=1),
             SpawnEntry(factory=_spawn_almond_water, weight=1.0, min_count=1, max_count=2),
         ),
-        # No floor hazards (spore cloud, unstable floor) here -- just the
-        # searchable debris pile. Guaranteed at least one per visit
-        # (min_count=1), growing with Engine.level_repeat_streak same as
-        # every other SpawnEntry table.
-        hazard_table=(SpawnEntry(factory=_spawn_debris_pile_garage, weight=1.0, min_count=1, max_count=1),),
+        # No floor hazards (spore cloud, unstable floor) here -- just
+        # searchable containers. The debris pile is guaranteed at least one
+        # per visit (min_count=1); a toolbox or two is a bonus find (min_count=0
+        # + weight 0.5, so it only sometimes turns up), fitting a garage full
+        # of stashed tools. Both grow with Engine.level_repeat_streak like every
+        # other SpawnEntry table.
+        hazard_table=(
+            SpawnEntry(factory=_spawn_debris_pile_garage, weight=1.0, min_count=1, max_count=1),
+            SpawnEntry(factory=_spawn_toolbox, weight=0.5, min_count=0, max_count=2),
+        ),
         # A settlement is a bonus find, not guaranteed every zone -- a sign
         # (see sign_factory) marks it from a distance before the door itself
         # is reached (see generator_office._place_settlement_door).
@@ -868,6 +1060,9 @@ LEVEL_3_PIPEWORKS = register(
         hazard_table=(
             SpawnEntry(factory=_spawn_spore_zone, weight=1.0, min_count=1, max_count=2),
             SpawnEntry(factory=_spawn_debris_pile_office, weight=1.0, min_count=1, max_count=1),
+            # Occasional bonus find among the pipes, same as the garage
+            # (min_count=0 + weight 0.5, so not every visit).
+            SpawnEntry(factory=_spawn_toolbox, weight=0.5, min_count=0, max_count=1),
         ),
         transition_rules=_looping_stairs_and_door("level_3_pipeworks"),
     )

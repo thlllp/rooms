@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     from backrooms.entity.components.attributes import AttributesComponent
     from backrooms.entity.components.barter import BarterComponent
     from backrooms.entity.components.consumable import ConsumableComponent
+    from backrooms.entity.components.container import ContainerComponent
     from backrooms.entity.components.dialogue import DialogueComponent
     from backrooms.entity.components.equipment import EquipmentComponent
     from backrooms.entity.components.equippable import EquippableComponent
@@ -20,7 +21,9 @@ if TYPE_CHECKING:
     from backrooms.entity.components.light_source import LightSourceComponent
     from backrooms.entity.components.perception import PerceptionComponent
     from backrooms.entity.components.quickness import QuicknessComponent
+    from backrooms.entity.components.salvageable import SalvageableComponent
     from backrooms.entity.components.sanity import SanityComponent
+    from backrooms.entity.components.tool import ToolComponent
 
 
 class RenderOrder(IntEnum):
@@ -53,6 +56,7 @@ class Entity:
         hallucination_expires_at: int | None = None,
         causes_dread: bool = False,
         dread_radius: int = 0,
+        contains_fabric: bool = False,
         ai: "BaseAI | None" = None,
         attributes: "AttributesComponent | None" = None,
         fighter: "Fighter | None" = None,
@@ -70,6 +74,9 @@ class Entity:
         equippable: "EquippableComponent | None" = None,
         barter: "BarterComponent | None" = None,
         afflictions: "AfflictionsComponent | None" = None,
+        tool: "ToolComponent | None" = None,
+        salvageable: "SalvageableComponent | None" = None,
+        container: "ContainerComponent | None" = None,
     ) -> None:
         self.x = x
         self.y = y
@@ -97,6 +104,10 @@ class Entity:
         # attacks still costs the player sanity by proximity.
         self.causes_dread = causes_dread
         self.dread_radius = dread_radius
+        # Whether scissors (see components.tool.make_fabric_cutter) can cut
+        # this item up into a Rag -- a plain flag rather than a component
+        # since it has no behavior of its own, same shape as causes_dread.
+        self.contains_fabric = contains_fabric
 
         # Single source of truth for "what components exist on an Entity":
         # each is set as an attribute AND wired with its `.entity` backref
@@ -121,6 +132,9 @@ class Entity:
             "equippable": equippable,
             "barter": barter,
             "afflictions": afflictions,
+            "tool": tool,
+            "salvageable": salvageable,
+            "container": container,
         }
         for name, component in components.items():
             setattr(self, name, component)

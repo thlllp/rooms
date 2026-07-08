@@ -4,7 +4,8 @@ from typing import TYPE_CHECKING
 
 from backrooms.constants import Color
 from backrooms.entity.components.attributes import attribute_value
-from backrooms.entity.components.inventory import effective_capacity
+from backrooms.entity.components.hazard import pick_loot
+from backrooms.entity.components.inventory import effective_capacity, store_or_drop
 from backrooms.entity.entity import RenderOrder
 from backrooms.world.crafting import CRAFTING_RECIPES
 from backrooms.world.level_registry import LEVEL_REGISTRY, LEVEL_STYLES
@@ -123,8 +124,12 @@ class PickupAction(Action):
 class CraftAction(Action):
     """Tries every registered recipe in order and crafts the first one whose
     ingredients are all currently held -- removes one of each ingredient,
-    adds the result. No crafting-station/location requirement; a no-op
-    (free) if nothing currently matches."""
+    adds the result. A recipe with `required_tool` set (see
+    entity.components.tool.ToolComponent/the Sewing Kit) additionally needs
+    a held tool of that name, which is NOT consumed as an ingredient but
+    instead ticks down one charge (see ToolComponent.consume_charge),
+    discarded only once that use empties it. No crafting-station/location
+    requirement; a no-op (free) if nothing currently matches."""
 
     def perform(self, engine: "Engine") -> None:
         player = self.entity
@@ -139,6 +144,11 @@ class CraftAction(Action):
             needed = {name: recipe.ingredients.count(name) for name in set(recipe.ingredients)}
             if any(held_names.count(name) < count for name, count in needed.items()):
                 continue
+            tool_item = None
+            if recipe.required_tool is not None:
+                tool_item = next((item for item in held if item.name == recipe.required_tool and item.tool is not None), None)
+                if tool_item is None:
+                    continue
 
             for ingredient_name in recipe.ingredients:
                 held.remove(next(item for item in held if item.name == ingredient_name))
@@ -146,6 +156,10 @@ class CraftAction(Action):
             result = recipe.result_factory()
             held.append(result)
             engine.message_log.add_message(f"You craft a {result.name}.", color=Color.WHITE)
+
+            if tool_item is not None and tool_item.tool.consume_charge():
+                held.remove(tool_item)
+                engine.message_log.add_message(f"Your {tool_item.name} is used up.", color=Color.GREY)
             return
 
         self.costs_turn = False
@@ -190,10 +204,13 @@ class UseItemAction(Action):
     currently equipped items -- exactly the order render_inventory_screen
     prints them (see EquipmentComponent.equipped_items), so a given index
     always means the same row on both sides. Selecting a held consumable
-    uses it; a held equippable equips it (swapping out whatever already
-    occupied that slot back into inventory, if anything); an already-equipped
-    item un-equips it back into inventory. Invalid/empty slots are a free
-    no-op rather than wasting the player's turn."""
+    uses it (removed from inventory); a held tool (e.g. Scissors, see
+    entity.components.tool) uses its effect but stays in inventory -- the
+    whole point of a tool over a consumable; a held equippable equips it
+    (swapping out whatever already occupied that slot back into inventory,
+    if anything); an already-equipped item un-equips it back into inventory.
+    Invalid/empty slots are a free no-op rather than wasting the player's
+    turn."""
 
     def __init__(self, entity: "Entity", slot_index: int) -> None:
         super().__init__(entity)
@@ -239,6 +256,14 @@ class UseItemAction(Action):
             elif item.consumable is not None:
                 held.remove(item)
                 item.consumable.use(player, engine)
+            elif item.tool is not None:
+                # A tool that did nothing (Scissors with no fabric held, or
+                # a tool with no direct-use effect at all) is a free no-op,
+                # same as an empty/invalid slot below -- don't burn a turn
+                # and hand hazards/enemies a free move for a selection that
+                # changed no game state.
+                if not item.tool.use(player, engine):
+                    self.costs_turn = False
             engine.show_inventory = False
             return
 
@@ -385,7 +410,12 @@ class AttackAction(Action):
         if target is None or target.fighter is None:
             return
 
-        power = attacker.fighter.power if attacker.fighter is not None else 0
+        base_power = attacker.fighter.power if attacker.fighter is not None else 0
+        # A wielded hand-slot weapon (e.g. a salvaged Chair Leg/Table Leg,
+        # see EquipmentComponent.power_bonus) adds straight onto the
+        # attacker's own power, on top of whatever their Fighter grants.
+        weapon_bonus = attacker.equipment.power_bonus() if attacker.equipment is not None else 0
+        power = base_power + weapon_bonus
         if power <= 0:
             engine.message_log.add_message(f"{attacker.name} bumps into {target.name}, harmlessly.", color=Color.GREY)
             return
@@ -397,6 +427,13 @@ class AttackAction(Action):
         applied = target.fighter.take_damage(power)
         color = Color.HAZARD if target is engine.player else Color.WARNING
         engine.message_log.add_message(f"{attacker.name} hits {target.name} for {applied:.0f}.", color=color)
+
+        # Only ticks down whatever actually contributed to this swing (see
+        # EquipmentComponent.register_weapon_hit) -- a connecting hit only,
+        # never a miss (the early return above already excludes that).
+        if attacker.equipment is not None:
+            for broken in attacker.equipment.register_weapon_hit():
+                engine.message_log.add_message(f"{attacker.name}'s {broken.name} breaks apart from the blow.", color=Color.WARNING)
 
         if target.fighter.hp <= 0:
             engine.kill_entity(target)
@@ -415,6 +452,69 @@ class TalkAction(Action):
     def perform(self, engine: "Engine") -> None:
         line = self.target.dialogue.pick_line(engine.rng)
         engine.message_log.add_message(f'{self.target.name}: "{line}"', color=Color.WHITE)
+
+
+class SalvageAction(Action):
+    """Bumping into salvageable wooden furniture (see
+    entity.components.salvageable.SalvageableComponent) attempts to wrench
+    a usable weapon free of it -- a flat strength check, not a probability
+    (see SalvageableComponent.strength_required), same "attribute compared
+    against a threshold" shape as _hit_chance's dexterity delta, just
+    pass/fail instead of a roll. A failed attempt still costs a turn (same
+    as a swing that misses) and leaves the furniture standing, so it's
+    worth retrying once strength grows (see
+    systems.experience_system.STRENGTH_PER_LEVEL). On success the result
+    goes straight into the pack, same "don't drop it underfoot" reasoning
+    as tick_debris_pile, falling back to the ground only if there's no
+    room."""
+
+    def __init__(self, entity: "Entity", *, target: "Entity") -> None:
+        super().__init__(entity)
+        self.target = target
+
+    def perform(self, engine: "Engine") -> None:
+        player = self.entity
+        target = self.target
+
+        if attribute_value(player, "strength") < target.salvageable.strength_required:
+            engine.message_log.add_message(
+                f"You strain against the {target.name}, but can't wrench anything loose.", color=Color.GREY
+            )
+            return
+
+        engine.game_map.entities.discard(target)
+        item = target.salvageable.result_factory()
+        store_or_drop(
+            player, item, target.x, target.y, engine,
+            stored_message=f"You wrench a {item.name} free of the {target.name}.",
+            dropped_message=f"You wrench a {item.name} free, but your pack is full -- it's on the ground.",
+        )
+
+
+class OpenContainerAction(Action):
+    """Bumping a container (see entity.components.container.ContainerComponent,
+    e.g. a Toolbox) opens it for one weighted-random item from its pool. No
+    strength gate, unlike SalvageAction -- a container just opens; it shares
+    the same weighted pick (hazard.pick_loot) and store-or-drop placement,
+    differing only in flavor and the missing gate. One-shot: the container is
+    removed whether or not the find fit the pack (an emptied toolbox is
+    emptied)."""
+
+    def __init__(self, entity: "Entity", *, target: "Entity") -> None:
+        super().__init__(entity)
+        self.target = target
+
+    def perform(self, engine: "Engine") -> None:
+        player = self.entity
+        target = self.target
+
+        engine.game_map.entities.discard(target)
+        item = pick_loot(engine.rng, target.container.loot_pool)
+        store_or_drop(
+            player, item, target.x, target.y, engine,
+            stored_message=f"You open the {target.name} and find a {item.name}.",
+            dropped_message=f"You open the {target.name}, but your pack is full -- the {item.name} stays on the ground.",
+        )
 
 
 class BarterAction(Action):
@@ -467,9 +567,11 @@ class BarterAction(Action):
 class BumpAction(Action):
     """What a directional key actually dispatches. In look mode it steers the
     look cursor (free of walkability/turn cost); otherwise it attacks if the
-    destination tile holds a Fighter-bearing entity, else moves. Resolves the
-    blocking-entity lookup once and hands it to whichever action it delegates
-    to, so the tile isn't scanned twice."""
+    destination tile holds a Fighter-bearing entity, salvages if it holds
+    salvageable furniture (see SalvageAction), opens it if it's a container
+    (see OpenContainerAction), else moves. Resolves the blocking-entity lookup
+    once and hands it to whichever action it delegates to, so the tile isn't
+    scanned twice."""
 
     def __init__(self, entity: "Entity", dx: int, dy: int) -> None:
         super().__init__(entity)
@@ -504,5 +606,9 @@ class BumpAction(Action):
             TalkAction(self.entity, target=target).perform(engine)
         elif target is not None and target.fighter is not None:
             AttackAction(self.entity, self.dx, self.dy, target=target).perform(engine)
+        elif target is not None and target.salvageable is not None:
+            SalvageAction(self.entity, target=target).perform(engine)
+        elif target is not None and target.container is not None:
+            OpenContainerAction(self.entity, target=target).perform(engine)
         else:
             MovementAction(self.entity, self.dx, self.dy, blocker=target).perform(engine)

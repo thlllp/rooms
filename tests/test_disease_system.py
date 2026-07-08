@@ -1,5 +1,7 @@
 from backrooms.entity.components.afflictions import AfflictionsComponent
 from backrooms.entity.components.attributes import AttributesComponent
+from backrooms.entity.components.equipment import EquipmentComponent
+from backrooms.entity.components.equippable import EquippableComponent
 from backrooms.entity.entity import Entity, RenderOrder
 from backrooms.systems.disease_system import HYDROLITIS_PLAGUE, process_diseases
 from backrooms.world import tile_types
@@ -32,12 +34,23 @@ class FakeEngine:
         self.game_map.tiles[5, 5] = tile_types.FLOODED_FLOOR
 
 
-def _player(*, endurance=5):
+def _player(*, endurance=5, equipment=None):
     p = Entity(
         5, 5, char="@", color=(255, 255, 255), name="Player", render_order=RenderOrder.PLAYER,
         attributes=AttributesComponent(endurance=endurance), afflictions=AfflictionsComponent(),
+        equipment=equipment,
     )
     return p
+
+
+def _wearing_wading_boots():
+    equipment = EquipmentComponent()
+    boots = Entity(
+        0, 0, char="W", color=(90, 80, 60), name="Wading Boots", render_order=RenderOrder.ITEM,
+        equippable=EquippableComponent(slot="feet", flood_resistance=1.0),
+    )
+    equipment.slots["feet"] = boots
+    return equipment
 
 
 def test_contracts_plague_on_contaminated_tile_when_roll_succeeds():
@@ -80,3 +93,21 @@ def test_already_infected_does_not_relog():
     engine = FakeEngine(player, roll=0.0)
     process_diseases(engine)
     assert engine.message_log.messages == []  # no duplicate contraction message
+
+
+def test_wading_boots_grant_full_immunity_on_ordinary_water():
+    player = _player(equipment=_wearing_wading_boots())
+    engine = FakeEngine(player, roll=0.0)  # would infect anyone unprotected
+    process_diseases(engine)
+    assert not player.afflictions.has(HYDROLITIS_PLAGUE)
+
+
+def test_wading_boots_do_not_protect_in_deep_water():
+    # Ankle-deep footwear goes under, not over, water that's actually deep --
+    # no current level places this tile yet, but the gate must hold once one
+    # does (see tile_types.ZoneEffect.DEEP_WATER).
+    player = _player(equipment=_wearing_wading_boots())
+    engine = FakeEngine(player, roll=0.0)
+    engine.game_map.tiles[5, 5] = tile_types.FLOODED_FLOOR_DEEP
+    process_diseases(engine)
+    assert player.afflictions.has(HYDROLITIS_PLAGUE)

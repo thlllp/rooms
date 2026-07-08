@@ -306,6 +306,15 @@ class LevelDefinition:
     # never overwritten (see generator_office._scatter_floor).
     scatter_floor_tile: np.ndarray | None = None
     scatter_floor_chance: float = 0.0
+    # Second scatter pass, applied only to tiles scatter_floor_tile just
+    # placed: each becomes this tile with deep_water_chance probability
+    # instead (Level 1.11 pooling a few deep pockets within its shallow
+    # flooding, see tile_types.FLOODED_FLOOR_DEEP) -- reuses the same
+    # generator_office._scatter_floor mechanism, just chained a second time
+    # with scatter_floor_tile standing in as the "base" this pass converts
+    # from. None (the default) leaves every scattered tile shallow.
+    deep_water_tile: np.ndarray | None = None
+    deep_water_chance: float = 0.0
 
     def feature_trigger_tile_ids(self) -> frozenset[str]:
         """Every tile_id that would fire a FEATURE_STEPPED_ON transition on

@@ -41,6 +41,12 @@ class ZoneEffect(IntFlag):
     # the Hydrolitis Plague (see systems/disease_system.py). Carried by
     # FLOODED_FLOOR, which Level 1.11 scatters over its damp base floor.
     CONTAMINATED = auto()
+    # Deep enough to go over the top of waterproof footwear -- a feet-slot
+    # item's flood_resistance (see the Wading Boots) only cancels out
+    # CONTAMINATED's plague risk where this flag is absent (see
+    # disease_system.process_diseases). Carried by FLOODED_FLOOR_DEEP, a
+    # rarer pocket scattered within Level 1.11's ordinary shallow flooding.
+    DEEP_WATER = auto()
 
 
 tile_dt = np.dtype(
@@ -254,4 +260,17 @@ FLOODED_FLOOR = new_tile(
     light=(ord(" "), Color.WHITE, Color.FLOODED_FLOOR_LIT),
     zone_effects=ZoneEffect.CONTAMINATED,
     tile_id="flooded_floor",
+)
+
+# A rarer, deeper pocket scattered within FLOODED_FLOOR's own patches (see
+# LevelDefinition.deep_water_tile) -- same look, but ZoneEffect.DEEP_WATER
+# means waterproof footwear no longer keeps the plague out (see
+# disease_system.process_diseases).
+FLOODED_FLOOR_DEEP = new_tile(
+    walkable=True,
+    transparent=True,
+    dark=(ord(" "), Color.WHITE, Color.FLOODED_FLOOR_DARK),
+    light=(ord(" "), Color.WHITE, Color.FLOODED_FLOOR_LIT),
+    zone_effects=ZoneEffect.CONTAMINATED | ZoneEffect.DEEP_WATER,
+    tile_id="flooded_floor_deep",
 )

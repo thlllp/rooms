@@ -12,10 +12,13 @@ from typing import TYPE_CHECKING, Callable
 
 from backrooms.constants import Color
 from backrooms.entity.components.base_component import BaseComponent
-from backrooms.entity.components.inventory import effective_capacity
+from backrooms.entity.components.equipment import worn_slot_effect
+from backrooms.entity.components.inventory import store_or_drop
 from backrooms.geometry import chebyshev_distance
 
 if TYPE_CHECKING:
+    import random
+
     from backrooms.engine import Engine
     from backrooms.entity.entity import Entity
 
@@ -35,6 +38,17 @@ class LootEntry:
 
     factory: Callable[[], "Entity"]
     weight: float = 1.0
+
+
+def pick_loot(rng: "random.Random", pool: tuple["LootEntry", ...]) -> "Entity":
+    """Builds one freshly-spawned item from `pool`, chosen by LootEntry.weight
+    (see its docstring) -- the shared weighted-pick used by both debris piles
+    (tick_debris_pile) and searchable containers
+    (actions.OpenContainerAction), so the weighting rule lives in one place.
+    Drawn from `rng` (engine.rng) rather than the global random so a seed
+    reproduces the same finds."""
+    entry = rng.choices(pool, weights=[e.weight for e in pool], k=1)[0]
+    return entry.factory()
 
 
 class HazardComponent(BaseComponent):
@@ -97,11 +111,9 @@ def tick_spore_damage(entity: "Entity", engine: "Engine") -> None:
     # A worn face-slot item (see EquippableComponent.spore_resistance, e.g.
     # the crafted Mask) blunts this specifically -- a respiratory hazard, not
     # a generic one -- rather than a blanket damage-reduction stat. This is
-    # the single-slot equip-effect pattern (see EquipmentComponent's own
-    # docstring for when to use this vs. a pool-wide summed method like
-    # capacity_bonus).
-    mask = player.equipment.slots.get("face") if player.equipment is not None else None
-    spore_resistance = mask.equippable.spore_resistance if mask is not None and mask.equippable is not None else 0.0
+    # the single-slot equip-effect pattern (see equipment.worn_slot_effect,
+    # shared with disease_system's feet-slot flood resistance).
+    spore_resistance = worn_slot_effect(player, "face", "spore_resistance")
     severity = entity.hazard.severity * (1.0 - spore_resistance)
 
     if severity <= 0:
@@ -225,23 +237,17 @@ def tick_debris_pile(entity: "Entity", engine: "Engine") -> None:
 
     data = entity.hazard.data
     if engine.rng.random() < data["good_chance"]:
-        entries: tuple[LootEntry, ...] = data["item_factories"]
-        entry = engine.rng.choices(entries, weights=[e.weight for e in entries], k=1)[0]
-        item = entry.factory()
+        item = pick_loot(engine.rng, data["item_factories"])
         # Put the find straight into the pack rather than dropping it on the
         # tile the player is already standing on -- there it renders hidden
         # under the player and reads as "the message lied, nothing appeared."
-        # Fall back to the floor only when there's genuinely no room.
-        inventory = player.inventory
-        if inventory is not None and len(inventory.items) < effective_capacity(player):
-            inventory.items.append(item)
-            engine.message_log.add_message(f"You dig through the debris and find a {item.name}.", color=Color.WHITE)
-        else:
-            item.place(entity.x, entity.y)
-            engine.game_map.entities.add(item)
-            engine.message_log.add_message(
-                f"You find a {item.name}, but your pack is full -- it's at your feet.", color=Color.WHITE
-            )
+        # Fall back to the floor only when there's genuinely no room (shared
+        # store-or-drop, same as furniture salvage -- see inventory.store_or_drop).
+        store_or_drop(
+            player, item, entity.x, entity.y, engine,
+            stored_message=f"You dig through the debris and find a {item.name}.",
+            dropped_message=f"You find a {item.name}, but your pack is full -- it's at your feet.",
+        )
     else:
         if player.sanity is not None:
             player.sanity.drain(entity.hazard.severity)

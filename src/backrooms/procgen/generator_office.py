@@ -494,6 +494,8 @@ def generate_office_level(ctx: "GenerationContext") -> GameMap:
         exit_hallway_chance = ctx.level_def.exit_hallway_chance
         scatter_floor_tile = ctx.level_def.scatter_floor_tile
         scatter_floor_chance = ctx.level_def.scatter_floor_chance
+        deep_water_tile = ctx.level_def.deep_water_tile
+        deep_water_chance = ctx.level_def.deep_water_chance
     else:
         door_chance = 0.0
         settlement_door_chance = 0.0
@@ -505,6 +507,8 @@ def generate_office_level(ctx: "GenerationContext") -> GameMap:
         exit_hallway_chance = 0.0
         scatter_floor_tile = None
         scatter_floor_chance = 0.0
+        deep_water_tile = None
+        deep_water_chance = 0.0
 
     game_map = GameMap(ctx.width, ctx.height, wall_tile=wall_tile)
     rooms: list[RectangularRoom] = []
@@ -593,4 +597,14 @@ def generate_office_level(ctx: "GenerationContext") -> GameMap:
     _place_columns(game_map, rooms, exclude=stairs_position, column_spacing=style.column_spacing)
     if scatter_floor_tile is not None and scatter_floor_chance > 0:
         _scatter_floor(game_map, ctx.rng, floor_tile, scatter_floor_tile, chance=scatter_floor_chance)
+        # Second pass, chained onto the first: converts some fraction of the
+        # tiles just scattered into the deeper variant (see
+        # LevelDefinition.deep_water_tile) -- no current level sets this, so
+        # it's a no-op everywhere until one opts in. Deliberately nested
+        # inside the shallow-scatter block and converting FROM scatter_floor_tile:
+        # deep water is a pocket that forms *within* the shallow flooding, so
+        # a level wanting deep water must configure the shallow scatter too --
+        # "deep water with no water around it" isn't a state that makes sense.
+        if deep_water_tile is not None and deep_water_chance > 0:
+            _scatter_floor(game_map, ctx.rng, scatter_floor_tile, deep_water_tile, chance=deep_water_chance)
     return game_map
