@@ -17,27 +17,52 @@ def test_hazard_nearby_true_within_radius_plus_buffer():
     engine = Engine(player=_make_player(), seed=1)
     spore = _make_spore(10, 10, radius=1)
     engine.game_map.entities.add(spore)
-    engine.game_map.visible[10, 10] = True
+    engine.game_map.explored[10, 10] = True
 
-    assert auto_explore.hazard_nearby(engine, (12, 10))  # radius 1 + buffer 1 = 2 tiles away
+    # Stepping from 3 tiles away to 2 tiles away: radius 1 + buffer 1 = 2.
+    assert auto_explore.hazard_nearby(engine, (13, 10), (12, 10))
 
 
 def test_hazard_nearby_false_beyond_buffer():
     engine = Engine(player=_make_player(), seed=1)
     spore = _make_spore(10, 10, radius=1)
     engine.game_map.entities.add(spore)
-    engine.game_map.visible[10, 10] = True
+    engine.game_map.explored[10, 10] = True
 
-    assert not auto_explore.hazard_nearby(engine, (13, 10))  # 3 tiles away
+    assert not auto_explore.hazard_nearby(engine, (14, 10), (13, 10))  # lands 3 tiles away
 
 
-def test_hazard_nearby_false_when_not_visible():
+def test_hazard_nearby_false_when_unexplored():
     engine = Engine(player=_make_player(), seed=1)
     spore = _make_spore(10, 10, radius=1)
     engine.game_map.entities.add(spore)
-    engine.game_map.visible[10, 10] = False  # not currently in FOV
+    engine.game_map.explored[10, 10] = False  # ground the player has never seen
 
-    assert not auto_explore.hazard_nearby(engine, (10, 10))
+    assert not auto_explore.hazard_nearby(engine, (13, 10), (12, 10))
+
+
+def test_hazard_nearby_true_when_explored_but_not_currently_visible():
+    # Damage ignores FOV (see hazard.py's _player_in_radius), so a remembered
+    # zone that's slipped out of tonight's light radius still stops the run.
+    engine = Engine(player=_make_player(), seed=1)
+    spore = _make_spore(10, 10, radius=1)
+    engine.game_map.entities.add(spore)
+    engine.game_map.explored[10, 10] = True
+    engine.game_map.visible[10, 10] = False
+
+    assert auto_explore.hazard_nearby(engine, (13, 10), (12, 10))
+
+
+def test_hazard_nearby_false_when_stepping_away():
+    # A player already inside the zone (or its buffer) must be able to
+    # auto-walk out: only steps that close the distance count.
+    engine = Engine(player=_make_player(), seed=1)
+    spore = _make_spore(10, 10, radius=1)
+    engine.game_map.entities.add(spore)
+    engine.game_map.explored[10, 10] = True
+
+    assert not auto_explore.hazard_nearby(engine, (11, 10), (12, 10))  # inside radius, moving out
+    assert not auto_explore.hazard_nearby(engine, (12, 10), (12, 11))  # along the buffer edge, no closer
 
 
 def test_hazard_nearby_ignores_radiusless_hazards():
@@ -46,9 +71,9 @@ def test_hazard_nearby_ignores_radiusless_hazards():
     engine = Engine(player=_make_player(), seed=1)
     floor = Entity(10, 10, char="=", color=(0, 0, 0), name="Unstable Floor", render_order=RenderOrder.HAZARD, hazard=make_unstable_floor())
     engine.game_map.entities.add(floor)
-    engine.game_map.visible[10, 10] = True
+    engine.game_map.explored[10, 10] = True
 
-    assert not auto_explore.hazard_nearby(engine, (10, 10))
+    assert not auto_explore.hazard_nearby(engine, (11, 10), (10, 10))
 
 
 def test_auto_explore_stops_before_stepping_into_hazard_range(monkeypatch):
@@ -57,7 +82,7 @@ def test_auto_explore_stops_before_stepping_into_hazard_range(monkeypatch):
     player.place(5, 5)
     spore = _make_spore(6, 5, radius=1)
     engine.game_map.entities.add(spore)
-    engine.game_map.visible[6, 5] = True
+    engine.game_map.explored[6, 5] = True
 
     # Isolate the hazard gate from procgen's frontier choice (see
     # test_travel.py's note on why frontier direction isn't deterministic
@@ -80,7 +105,7 @@ def test_travel_stops_before_stepping_into_hazard_range():
     player.place(5, 5)
     spore = _make_spore(6, 5, radius=1)
     engine.game_map.entities.add(spore)
-    engine.game_map.visible[6, 5] = True
+    engine.game_map.explored[6, 5] = True
 
     engine.start_travel((9, 5))
     engine.travel_path = [(6, 5), (7, 5), (8, 5), (9, 5)]
@@ -90,3 +115,21 @@ def test_travel_stops_before_stepping_into_hazard_range():
     assert (player.x, player.y) == (5, 5)  # never moved
     assert not engine.traveling
     assert "too close" in engine.message_log.tail(1)[0][0]
+
+
+def test_travel_can_walk_out_of_a_hazard_zone():
+    # Starting inside the damage zone is exactly when the player most wants
+    # travel to work -- the gate must not trap them on the spot.
+    engine = Engine(player=_make_player(), seed=1)
+    player = engine.player
+    player.place(5, 5)
+    spore = _make_spore(5, 5, radius=1)
+    engine.game_map.entities.add(spore)
+    engine.game_map.explored[5, 5] = True
+
+    engine.start_travel((8, 5))
+    engine.travel_path = [(6, 5), (7, 5), (8, 5)]
+
+    auto_explore.step_travel(engine)
+
+    assert (player.x, player.y) == (6, 5)  # stepped away, not stopped

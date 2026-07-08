@@ -171,7 +171,7 @@ class TravelToAction(Action):
     per real-time tick (rate-limited there) while engine.traveling is set --
     same shape as AutoExploreAction, just pathed at (x, y) specifically
     instead of the nearest unexplored frontier (see
-    systems.auto_explore.find_step_toward). costs_turn=False for the same
+    systems.auto_explore.find_path_to). costs_turn=False for the same
     reason as AutoExploreAction: each step taken advances a turn on its own."""
 
     costs_turn = False

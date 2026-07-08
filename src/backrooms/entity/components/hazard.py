@@ -57,14 +57,34 @@ class HazardComponent(BaseComponent):
         if self.active:
             self.tick_effect(self.entity, engine)
 
+    @property
+    def is_area(self) -> bool:
+        """Whether this hazard endangers a radius around its tile (spore/heat/
+        impact/twilight zones) rather than only the exact tile it sits on
+        (unstable floors, debris piles) -- the classification auto_explore
+        uses to decide what counts as something you can "walk into", kept
+        here so callers never key on `.data`'s internal layout directly."""
+        return "radius" in self.data
+
+
+def hazard_threatens(entity: "Entity", x: int, y: int, *, buffer: int = 0) -> bool:
+    """Whether (x, y) is within the hazard's data['radius'] (Chebyshev, plus
+    `buffer` extra tiles) of its tile -- the single radius rule for every
+    tile-anchored hazard, shared by the damage ticks (via _player_in_radius)
+    and by auto_explore's early-warning stop (buffer=1), so "would this hurt"
+    and "should auto-movement stop" can never drift apart. Inactive hazards
+    never tick (see HazardComponent.tick), so they threaten nothing here
+    either. Checked live off the entity's position rather than a precomputed
+    tile set, so the spawner can drop the hazard anywhere without knowing map
+    layout."""
+    return entity.hazard.active and chebyshev_distance(x, y, entity.x, entity.y) <= entity.hazard.data.get("radius", 0) + buffer
+
 
 def _player_in_radius(entity: "Entity", engine: "Engine") -> bool:
-    """Whether the player is within the hazard's data['radius'] (Chebyshev) of
-    its tile -- the shared entry gate for every tile-anchored radius hazard.
-    Checked live off the entity's position rather than a precomputed tile set,
-    so the spawner can drop the hazard anywhere without knowing map layout."""
+    """hazard_threatens at the player's own tile -- the shared entry gate for
+    every tile-anchored radius hazard's tick."""
     player = engine.player
-    return chebyshev_distance(player.x, player.y, entity.x, entity.y) <= entity.hazard.data.get("radius", 0)
+    return hazard_threatens(entity, player.x, player.y)
 
 
 def tick_spore_damage(entity: "Entity", engine: "Engine") -> None:
