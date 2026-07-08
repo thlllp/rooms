@@ -9,33 +9,46 @@ def _make_player():
     return Entity(0, 0, char="@", color=(255, 255, 255), name="Player", blocks_movement=True, render_order=RenderOrder.PLAYER)
 
 
-def test_travel_path_reaches_unexplored_target():
-    # Exercises find_path_to directly rather than driving step_travel() for
-    # 150+ turns: game_map.entities is a plain set with no __hash__/__eq__
-    # override, so process_ai's iteration order over it (and therefore how
-    # much of engine.rng's stream each AI-driven entity consumes, and so
-    # where they end up wandering) isn't stable across process runs -- an
-    # entity occasionally wanders into view over that many turns and trips
-    # hostile_visible(), which is a real pre-existing engine-determinism gap
-    # but not what this test is about. Pathfinding itself has no such
-    # dependency: it only reads game_map tiles/blocking entities, so this is
+def test_travel_path_does_not_reach_unexplored_target():
+    # A click can only ever land on ground the player is actually looking
+    # at -- travel-to-point shouldn't route through (or land on) fog the
+    # player has no way to know is even open. game_map.entities being a
+    # plain set (no stable iteration order across process runs -- see the
+    # note this test used to carry) isn't a factor here either way:
+    # pathfinding only reads game_map tiles/blocking entities, so this is
     # fully deterministic for a given seed.
     engine = Engine(player=_make_player(), seed=1)
     game_map = engine.game_map
     start = (engine.player.x, engine.player.y)
 
-    # The farthest walkable tile that hasn't been seen yet -- travel should
-    # still path straight to it, ignoring fog of war entirely.
+    # The farthest walkable tile that hasn't been seen yet.
     target = max(
         ((x, y) for x in range(game_map.width) for y in range(game_map.height) if game_map.tiles["walkable"][x, y]),
         key=lambda pos: abs(pos[0] - start[0]) + abs(pos[1] - start[1]),
     )
     assert not game_map.explored[target]
 
+    assert find_path_to(game_map, start, target) is None
+
+
+def test_travel_path_reaches_explored_target():
+    engine = Engine(player=_make_player(), seed=1)
+    game_map = engine.game_map
+    start = (engine.player.x, engine.player.y)
+
+    # A walkable tile the player has actually seen should still be reachable.
+    target = next(
+        (x, y)
+        for x in range(game_map.width)
+        for y in range(game_map.height)
+        if game_map.tiles["walkable"][x, y] and game_map.explored[x, y] and (x, y) != start
+    )
+
     path = find_path_to(game_map, start, target)
 
     assert path is not None
     assert path[-1] == target
+    assert all(game_map.explored[pos] for pos in path)
 
 
 def test_travel_and_auto_explore_are_mutually_exclusive():

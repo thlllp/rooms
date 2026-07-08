@@ -4,9 +4,11 @@ specific tile using that same BFS core.
 A "frontier" tile is any walkable tile bordering an unexplored one -- heading
 toward the nearest one and repeating is a standard, simple way to cover a
 level without the player manually retracing already-seen ground. Travel-to-
-point instead heads for one exact destination tile, regardless of whether
-it (or anything along the way) has been explored yet -- same walkability/
-occupancy rules, just a different stopping condition.
+point instead heads for one exact destination tile -- same walkability/
+occupancy rules, but additionally confined to ground the player has already
+seen (see _bfs_path's require_explored), since a click can only ever land on
+a tile the player is looking at, not a route through fog the player has no
+way to know is even open.
 
 `step()`/`step_travel()` each perform exactly one such move and are meant to
 be called once per real-time tick from main.py's loop (via
@@ -23,6 +25,7 @@ from collections import deque
 from typing import TYPE_CHECKING, Callable
 
 from backrooms.constants import Color
+from backrooms.geometry import chebyshev_distance
 
 if TYPE_CHECKING:
     from backrooms.engine import Engine
@@ -44,14 +47,25 @@ def _borders_unexplored(game_map: "GameMap", x: int, y: int) -> bool:
 
 
 def _bfs_path(
-    game_map: "GameMap", start: tuple[int, int], is_goal: Callable[[tuple[int, int]], bool]
+    game_map: "GameMap",
+    start: tuple[int, int],
+    is_goal: Callable[[tuple[int, int]], bool],
+    *,
+    require_explored: bool = False,
 ) -> list[tuple[int, int]] | None:
     """Shared BFS core for find_step_toward_frontier/find_step_toward/
     find_path_to: walks outward from `start` over walkable, unoccupied tiles
     until `is_goal` matches some reachable tile, then walks that tile's
     parent chain back into the full route there (excluding `start`, ending
     with the matched tile). None if no reachable tile (other than `start`
-    itself, which never counts) satisfies `is_goal`."""
+    itself, which never counts) satisfies `is_goal`.
+
+    `require_explored` additionally confines every tile the BFS steps onto
+    (including the goal) to game_map.explored -- used by the travel-to-point
+    callers so a click can't route through fog the player has never seen,
+    while find_step_toward_frontier leaves it off: auto-explore already
+    knows the full map's walkability and is finding its way *to* the edge of
+    what's explored, not restricted to staying inside it."""
     visited = {start}
     parent: dict[tuple[int, int], tuple[int, int]] = {}
     queue: deque[tuple[int, int]] = deque([start])
@@ -72,6 +86,8 @@ def _bfs_path(
             nx, ny = neighbor
             if not game_map.is_walkable(nx, ny) or game_map.get_blocking_entity_at(nx, ny) is not None:
                 continue
+            if require_explored and not game_map.explored[nx, ny]:
+                continue
             visited.add(neighbor)
             parent[neighbor] = current
             queue.append(neighbor)
@@ -88,10 +104,10 @@ def find_step_toward_frontier(game_map: "GameMap", start: tuple[int, int]) -> tu
 
 
 def find_step_toward(game_map: "GameMap", start: tuple[int, int], target: tuple[int, int]) -> tuple[int, int] | None:
-    """Returns the (dx, dy) of the first step toward `target` specifically
-    (ignoring explored/visible state entirely, same as find_step_toward_frontier
-    already does), or None if `target` is unreachable or is `start` itself."""
-    path = _bfs_path(game_map, start, lambda pos: pos == target)
+    """Returns the (dx, dy) of the first step toward `target` specifically,
+    confined to already-explored ground (see _bfs_path's require_explored),
+    or None if `target` is unreachable that way or is `start` itself."""
+    path = _bfs_path(game_map, start, lambda pos: pos == target, require_explored=True)
     return None if path is None else (path[0][0] - start[0], path[0][1] - start[1])
 
 
@@ -101,8 +117,10 @@ def find_path_to(
     """The full route (excluding `start`, ending with `target`) find_step_toward
     would walk one step at a time -- used to preview the upcoming route while
     traveling (see rendering/ui.render_travel_path), not for movement itself.
-    None if `target` is unreachable or is `start` itself."""
-    return _bfs_path(game_map, start, lambda pos: pos == target)
+    Confined to already-explored ground, same as find_step_toward (see
+    _bfs_path's require_explored) -- None if `target` is unreachable that way
+    or is `start` itself."""
+    return _bfs_path(game_map, start, lambda pos: pos == target, require_explored=True)
 
 
 def hostile_visible(engine: "Engine") -> bool:
@@ -112,6 +130,32 @@ def hostile_visible(engine: "Engine") -> bool:
     game_map = engine.game_map
     player = engine.player
     return any(e is not player and e.ai is not None and game_map.visible[e.x, e.y] for e in game_map.entities)
+
+
+# Extra buffer (in tiles, beyond the hazard's own damage radius) that counts
+# as "nearby" for hazard_nearby below -- one tile of warning before a step
+# would actually put the player in range, same spirit as hostile_visible
+# stopping short of a fight rather than mid-hit.
+HAZARD_WARNING_BUFFER = 1
+
+
+def hazard_nearby(engine: "Engine", next_pos: tuple[int, int]) -> bool:
+    """True if a currently visible, active, radius-based hazard (spore cloud,
+    heater, lurching wall, ...) is within HAZARD_WARNING_BUFFER tiles of
+    `next_pos` -- auto-explore/travel stop before wandering into (or right up
+    to the edge of) a damage zone unattended, rather than after taking the
+    hit. Hazards with no `radius` (debris piles, unstable floors) only
+    trigger on the exact tile the player is standing on, so they aren't
+    something you "walk into" the same way and are left out here."""
+    game_map = engine.game_map
+    return any(
+        e.hazard is not None
+        and e.hazard.active
+        and "radius" in e.hazard.data
+        and game_map.visible[e.x, e.y]
+        and chebyshev_distance(next_pos[0], next_pos[1], e.x, e.y) <= e.hazard.data["radius"] + HAZARD_WARNING_BUFFER
+        for e in game_map.entities
+    )
 
 
 def step(engine: "Engine") -> None:
@@ -139,6 +183,11 @@ def step(engine: "Engine") -> None:
         return
 
     dx, dy = move
+    if hazard_nearby(engine, (player.x + dx, player.y + dy)):
+        engine.message_log.add_message("A hazard's too close -- you stop exploring.", color=Color.WARNING)
+        engine.stop_continuing_mode()
+        return
+
     level_before = engine.current_level_id
     player.move(dx, dy)
     engine.advance_turn()
@@ -185,6 +234,11 @@ def step_travel(engine: "Engine") -> None:
         return
 
     dx, dy = path[0][0] - player.x, path[0][1] - player.y
+    if hazard_nearby(engine, (player.x + dx, player.y + dy)):
+        engine.message_log.add_message("A hazard's too close -- you stop traveling.", color=Color.WARNING)
+        engine.stop_continuing_mode()
+        return
+
     level_before = engine.current_level_id
     player.move(dx, dy)
     engine.advance_turn()
