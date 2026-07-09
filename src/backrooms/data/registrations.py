@@ -17,12 +17,12 @@ from backrooms.entity.components.consumable import (
     make_sanity_restore_item,
 )
 from backrooms.entity.components.container import ContainerComponent
+from backrooms.entity.components.debris import DebrisComponent
 from backrooms.entity.components.dialogue import DialogueComponent
 from backrooms.entity.components.equippable import EquippableComponent
 from backrooms.entity.components.fighter import Fighter
 from backrooms.entity.components.hazard import (
     LootEntry,
-    make_debris_pile,
     make_heat_zone,
     make_impact_zone,
     make_spore_zone,
@@ -328,12 +328,17 @@ def _spawn_hiking_bag() -> Entity:
     )
 
 
-# Plain found clothing -- chest/legs equipment with no passive effect at all,
-# unlike every other equippable above. Their only purpose right now is as
-# fabric source material: worn for flavor if you like, but mainly something
-# Scissors (see make_fabric_cutter) turns into a Rag. Several distinct named
-# items rather than one generic "Clothing" so debris piles turn up some
-# variety, same reasoning as LootEntry's docstring on varying finds.
+# Plain found clothing -- chest/legs/feet equipment with no passive effect at
+# all, unlike every other equippable above. Their only purpose right now is
+# as fabric source material: worn for flavor if you like, but mainly
+# something Scissors (see make_fabric_cutter) turns into a Rag (Sneakers are
+# the one exception -- no cloth in a rubber sole, so no contains_fabric).
+# Several distinct named items rather than one generic "Clothing" so debris
+# piles turn up some variety, same reasoning as LootEntry's docstring on
+# varying finds. spawn_cotton_tshirt/spawn_faded_jeans/spawn_sneakers are
+# public (not underscore-prefixed) because data.player_classes.build_player
+# also reaches for this exact trio to dress a fresh character -- same items
+# a debris pile might later turn up, not a separate starting-only lookalike.
 def _spawn_flannel_shirt() -> Entity:
     return Entity(
         0, 0, char="s", color=(150, 70, 60), name="Flannel Shirt", render_order=RenderOrder.ITEM,
@@ -341,14 +346,14 @@ def _spawn_flannel_shirt() -> Entity:
     )
 
 
-def _spawn_cotton_tshirt() -> Entity:
+def spawn_cotton_tshirt() -> Entity:
     return Entity(
         0, 0, char="T", color=(200, 195, 185), name="Cotton T-Shirt", render_order=RenderOrder.ITEM,
         equippable=EquippableComponent(slot="chest"), contains_fabric=True,
     )
 
 
-def _spawn_faded_jeans() -> Entity:
+def spawn_faded_jeans() -> Entity:
     return Entity(
         0, 0, char="j", color=(70, 90, 130), name="Faded Jeans", render_order=RenderOrder.ITEM,
         equippable=EquippableComponent(slot="legs"), contains_fabric=True,
@@ -359,6 +364,13 @@ def _spawn_canvas_trousers() -> Entity:
     return Entity(
         0, 0, char="J", color=(150, 140, 100), name="Canvas Trousers", render_order=RenderOrder.ITEM,
         equippable=EquippableComponent(slot="legs"), contains_fabric=True,
+    )
+
+
+def spawn_sneakers() -> Entity:
+    return Entity(
+        0, 0, char="o", color=(210, 210, 210), name="Sneakers", render_order=RenderOrder.ITEM,
+        equippable=EquippableComponent(slot="feet"),
     )
 
 
@@ -601,10 +613,11 @@ def _spawn_toolbox() -> Entity:
     )
 
 
-# Searchable, one-shot: resolves into either a dropped item or a sanity hit
-# the moment the player steps onto it, then removes itself (see
-# make_debris_pile/tick_debris_pile). Not on level_0_office -- these are
-# meant for the levels the player is stuck looping through.
+# Searchable, one-shot: blocks the tile outright (no walking through it) --
+# bumping it resolves into either a stored item or a sanity hit, then removes
+# itself (see components.debris.DebrisComponent/actions.SearchDebrisAction).
+# Not on level_0_office -- these are meant for the levels the player is stuck
+# looping through.
 def _spawn_debris_pile_office() -> Entity:
     return Entity(
         0,
@@ -612,8 +625,9 @@ def _spawn_debris_pile_office() -> Entity:
         char="%",
         color=Color.DEBRIS,
         name="Debris Pile",
+        blocks_movement=True,
         render_order=RenderOrder.HAZARD,
-        hazard=make_debris_pile(
+        debris=DebrisComponent(
             item_factories=(
                 LootEntry(_spawn_almond_water),
                 LootEntry(_spawn_first_aid_kit),
@@ -633,9 +647,10 @@ def _spawn_debris_pile_office() -> Entity:
                 # for Scissors (see make_fabric_cutter) rather than a
                 # functional item.
                 LootEntry(_spawn_flannel_shirt),
-                LootEntry(_spawn_cotton_tshirt),
-                LootEntry(_spawn_faded_jeans),
+                LootEntry(spawn_cotton_tshirt),
+                LootEntry(spawn_faded_jeans),
                 LootEntry(_spawn_canvas_trousers),
+                LootEntry(spawn_sneakers),
                 # The tool that turns any of the above (or the Mask/backpacks)
                 # into a Rag -- less common than an ordinary find since it's
                 # reusable, not consumed.
@@ -664,8 +679,9 @@ def _spawn_debris_pile_garage() -> Entity:
         char="%",
         color=Color.DEBRIS,
         name="Debris Pile",
+        blocks_movement=True,
         render_order=RenderOrder.HAZARD,
-        hazard=make_debris_pile(
+        debris=DebrisComponent(
             item_factories=(
                 LootEntry(_spawn_almond_water),
                 LootEntry(_spawn_canned_food),

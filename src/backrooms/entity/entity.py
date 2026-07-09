@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     from backrooms.entity.components.barter import BarterComponent
     from backrooms.entity.components.consumable import ConsumableComponent
     from backrooms.entity.components.container import ContainerComponent
+    from backrooms.entity.components.debris import DebrisComponent
     from backrooms.entity.components.dialogue import DialogueComponent
     from backrooms.entity.components.equipment import EquipmentComponent
     from backrooms.entity.components.equippable import EquippableComponent
@@ -77,6 +78,7 @@ class Entity:
         tool: "ToolComponent | None" = None,
         salvageable: "SalvageableComponent | None" = None,
         container: "ContainerComponent | None" = None,
+        debris: "DebrisComponent | None" = None,
     ) -> None:
         self.x = x
         self.y = y
@@ -135,6 +137,7 @@ class Entity:
             "tool": tool,
             "salvageable": salvageable,
             "container": container,
+            "debris": debris,
         }
         for name, component in components.items():
             setattr(self, name, component)

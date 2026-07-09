@@ -30,8 +30,12 @@ from backrooms.world.level_registry import (
 # Read by Engine (to initialize/reset them all in one place, instead of a
 # hand-written line per flag that's easy to forget -- see main.py's
 # MODE_ALLOWED_ACTIONS, which is keyed by these same names and asserts its
-# keys match this tuple exactly).
-MODAL_FLAGS = ("show_character_screen", "show_inventory", "look_mode", "show_barter")
+# keys match this tuple exactly). "show_interact" is listed before
+# "look_mode" deliberately -- both are true at once while the interact menu
+# is open (see actions.OpenInteractMenuAction), and _is_action_allowed picks
+# the FIRST true flag here as the active mode, so show_interact must win that
+# tie or its own number-key actions would be rejected as look_mode's.
+MODAL_FLAGS = ("show_character_screen", "show_inventory", "show_barter", "show_interact", "look_mode")
 
 # Wall crossed -> which neighboring zone coordinate that leads to, and which
 # wall of that neighbor the player arrives at (the opposite side -- walk off
@@ -167,6 +171,12 @@ class Engine:
         # barter screen pointed at an entity from the level you just left.
         self.barter_partner: "Entity | None" = None
         self.barter_greeting: str = ""
+        # The menu built by actions.OpenInteractMenuAction for whatever's at
+        # engine.look_cursor -- same "clear it on every reset" reasoning as
+        # barter_partner, so a level transition can't leave stale entity
+        # references (e.g. a target already discarded on the level just left)
+        # sitting in a menu that's about to render again.
+        self.interact_options: list = []
 
     def load_level(self, level_id: str) -> None:
         # Whether this counts as "still repeating the same level type" --

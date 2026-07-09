@@ -146,9 +146,11 @@ def hazard_nearby(engine: "Engine", from_pos: tuple[int, int], next_pos: tuple[i
     player's risk to take, same as walking there by hand. Only steps that
     strictly decrease the distance to the hazard count, so a player already
     inside a zone (or its buffer) can still auto-walk out instead of being
-    stopped on the spot every try. Tile-only hazards (is_area False: debris
-    piles, unstable floors) aren't something you "walk into" the same way
-    and are left out here."""
+    stopped on the spot every try. Tile-only hazards (is_area False: unstable
+    floors) aren't something you "walk into" the same way and are left out
+    here -- debris piles/toolboxes aren't hazards at all anymore (see
+    components.debris/container), just ordinary blocks_movement obstacles the
+    pathfinding BFS already routes around (see _bfs_path)."""
     game_map = engine.game_map
     return any(
         e.hazard is not None

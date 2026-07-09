@@ -68,8 +68,8 @@ def make_fabric_cutter(rag_factory: Callable[[], "Entity"]) -> ToolComponent:
     is chosen. Takes the Rag factory as a parameter instead of importing one
     directly: this module sits below data/registrations.py in the dependency
     graph (every concrete item factory lives there), same reason
-    make_debris_pile takes its item_factories from the caller rather than
-    importing them itself."""
+    DebrisComponent/ContainerComponent take their item_factories/loot_pool
+    from the caller rather than importing them itself."""
 
     def _use(user: "Entity", engine: "Engine") -> bool:
         held = user.inventory.items if user.inventory is not None else []

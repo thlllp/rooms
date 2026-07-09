@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 from backrooms.constants import Color
 from backrooms.entity.components.attributes import attribute_value
@@ -38,7 +38,13 @@ class EscapeAction(Action):
     costs_turn = False
 
     def perform(self, engine: "Engine") -> None:
-        if engine.look_mode:
+        if engine.show_interact:
+            # Closes just the menu, not look mode itself -- a second Escape
+            # (falling through to the look_mode branch below) is what backs
+            # all the way out to normal movement.
+            engine.show_interact = False
+            engine.interact_options = []
+        elif engine.look_mode:
             engine.look_mode = False
         elif engine.show_character_screen:
             engine.show_character_screen = False
@@ -491,6 +497,42 @@ class SalvageAction(Action):
         )
 
 
+class SearchDebrisAction(Action):
+    """Bumping a debris pile (see entity.components.debris.DebrisComponent)
+    gambles on its pool: `good_chance` odds of a weighted-random find (same
+    pick_loot/store_or_drop plumbing as SalvageAction/OpenContainerAction),
+    else a jolt of bad luck that drains sanity instead of turning up
+    anything. No strength gate, unlike SalvageAction -- anyone can dig
+    through debris, they just might not like what they find. One-shot
+    either way: a search that comes up empty is still a search, so the pile
+    is removed regardless of outcome, same as tick_debris_pile used to do
+    the instant the player stepped onto it -- now it takes an explicit bump
+    instead, since debris piles block movement rather than being walked
+    onto."""
+
+    def __init__(self, entity: "Entity", *, target: "Entity") -> None:
+        super().__init__(entity)
+        self.target = target
+
+    def perform(self, engine: "Engine") -> None:
+        player = self.entity
+        target = self.target
+        debris = target.debris
+
+        engine.game_map.entities.discard(target)
+        if engine.rng.random() < debris.good_chance:
+            item = pick_loot(engine.rng, debris.item_factories)
+            store_or_drop(
+                player, item, target.x, target.y, engine,
+                stored_message=f"You dig through the {target.name} and find a {item.name}.",
+                dropped_message=f"You find a {item.name}, but your pack is full -- it's at your feet.",
+            )
+        else:
+            if player.sanity is not None:
+                player.sanity.drain(debris.sanity_penalty)
+            engine.message_log.add_message("Something about the debris unsettles you.", color=Color.HAZARD)
+
+
 class OpenContainerAction(Action):
     """Bumping a container (see entity.components.container.ContainerComponent,
     e.g. a Toolbox) opens it for one weighted-random item from its pool. No
@@ -515,6 +557,27 @@ class OpenContainerAction(Action):
             stored_message=f"You open the {target.name} and find a {item.name}.",
             dropped_message=f"You open the {target.name}, but your pack is full -- the {item.name} stays on the ground.",
         )
+
+
+class OpenBarterAction(Action):
+    """Opens engine.show_barter for `target` -- extracted out of BumpAction's
+    barter branch so actions.available_interactions (the interact-menu's
+    "Trade with X" option) can trigger the exact same screen a bump into the
+    Elder does, rather than duplicating the three-line setup. Free like
+    browsing itself (see BarterAction's own costs_turn=False); the caller
+    (BumpAction) still sets its own costs_turn=False after delegating here,
+    same as it already does for TalkAction/AttackAction et al."""
+
+    costs_turn = False
+
+    def __init__(self, entity: "Entity", *, target: "Entity") -> None:
+        super().__init__(entity)
+        self.target = target
+
+    def perform(self, engine: "Engine") -> None:
+        engine.show_barter = True
+        engine.barter_partner = self.target
+        engine.barter_greeting = self.target.barter.pick_greeting(engine.rng)
 
 
 class BarterAction(Action):
@@ -569,8 +632,9 @@ class BumpAction(Action):
     look cursor (free of walkability/turn cost); otherwise it attacks if the
     destination tile holds a Fighter-bearing entity, salvages if it holds
     salvageable furniture (see SalvageAction), opens it if it's a container
-    (see OpenContainerAction), else moves. Resolves the blocking-entity lookup
-    once and hands it to whichever action it delegates to, so the tile isn't
+    (see OpenContainerAction), searches it if it's a debris pile (see
+    SearchDebrisAction), else moves. Resolves the blocking-entity lookup once
+    and hands it to whichever action it delegates to, so the tile isn't
     scanned twice."""
 
     def __init__(self, entity: "Entity", dx: int, dy: int) -> None:
@@ -598,9 +662,7 @@ class BumpAction(Action):
             # engine.MODAL_FLAGS "show_barter" / rendering.render_barter_screen)
             # rather than talking or attacking -- checked before dialogue so an
             # Elder can carry flavor lines too without them shadowing the trade.
-            engine.show_barter = True
-            engine.barter_partner = target
-            engine.barter_greeting = target.barter.pick_greeting(engine.rng)
+            OpenBarterAction(self.entity, target=target).perform(engine)
             self.costs_turn = False
         elif target is not None and target.dialogue is not None:
             TalkAction(self.entity, target=target).perform(engine)
@@ -610,5 +672,113 @@ class BumpAction(Action):
             SalvageAction(self.entity, target=target).perform(engine)
         elif target is not None and target.container is not None:
             OpenContainerAction(self.entity, target=target).perform(engine)
+        elif target is not None and target.debris is not None:
+            SearchDebrisAction(self.entity, target=target).perform(engine)
         else:
             MovementAction(self.entity, self.dx, self.dy, blocker=target).perform(engine)
+
+
+class InteractOption(NamedTuple):
+    """One row of engine.interact_options (see OpenInteractMenuAction): a
+    label to print and the already-constructed Action that pressing its row
+    number performs (see InteractAction) -- built ready-to-go rather than as
+    a factory, since by the time the menu is open the target entity is
+    already resolved and can't change out from under the player."""
+
+    label: str
+    action: Action
+
+
+def available_interactions(player: "Entity", engine: "Engine", x: int, y: int) -> list[InteractOption]:
+    """Every interaction offered here mirrors a branch BumpAction already
+    has -- this exists so look mode's Space key can present the SAME set of
+    outcomes as walking into (x, y) would, just as an explicit menu instead
+    of one branch silently winning. Per-entity precedence (barter > dialogue
+    > fighter > salvageable > container > debris) matches BumpAction's own
+    elif chain exactly, so the two never disagree about what a given entity
+    offers -- but unlike BumpAction, entities are considered independently, so e.g. an
+    item lying on the same tile as a container both show up as their own
+    row. "Pick up" is the one option BumpAction has no equivalent for (bump
+    never fires for the player's own tile) -- restricted to (x, y) being
+    exactly where the player stands, same as PickupAction/the G key."""
+    options: list[InteractOption] = []
+    dx, dy = x - player.x, y - player.y
+    for entity in engine.game_map.entities_at(x, y):
+        if entity is player:
+            continue
+        if entity.barter is not None:
+            options.append(InteractOption(f"Trade with {entity.name}", OpenBarterAction(player, target=entity)))
+        elif entity.dialogue is not None:
+            options.append(InteractOption(f"Talk to {entity.name}", TalkAction(player, target=entity)))
+        elif entity.fighter is not None:
+            options.append(InteractOption(f"Attack {entity.name}", AttackAction(player, dx, dy, target=entity)))
+        elif entity.salvageable is not None:
+            options.append(InteractOption(f"Salvage {entity.name}", SalvageAction(player, target=entity)))
+        elif entity.container is not None:
+            options.append(InteractOption(f"Open {entity.name}", OpenContainerAction(player, target=entity)))
+        elif entity.debris is not None:
+            options.append(InteractOption(f"Search {entity.name}", SearchDebrisAction(player, target=entity)))
+        elif entity.render_order == RenderOrder.ITEM and dx == 0 and dy == 0:
+            options.append(InteractOption(f"Pick up {entity.name}", PickupAction(player)))
+    return options
+
+
+class OpenInteractMenuAction(Action):
+    """Bound to Space while look mode is active (see input_handlers.py) --
+    builds engine.interact_options for whatever's at engine.look_cursor (see
+    available_interactions) and opens engine.show_interact so
+    rendering.ui.render_interact_menu can list them. Only the player's own
+    tile or one of the eight adjacent ones qualifies -- every interaction
+    available_interactions can offer is itself bump-range only, so a cursor
+    parked further out always has nothing legal to show. Opening the menu is
+    free, same as any other modal; the chosen option's own cost applies once
+    something is actually picked (see InteractAction)."""
+
+    costs_turn = False
+
+    def perform(self, engine: "Engine") -> None:
+        if not engine.look_mode:
+            return
+
+        player = self.entity
+        cursor_x, cursor_y = engine.look_cursor
+        if max(abs(cursor_x - player.x), abs(cursor_y - player.y)) > 1:
+            engine.message_log.add_message("That's too far away to interact with.", color=Color.GREY)
+            return
+
+        options = available_interactions(player, engine, cursor_x, cursor_y)
+        if not options:
+            engine.message_log.add_message("There's nothing here to interact with.", color=Color.GREY)
+            return
+
+        engine.interact_options = options
+        engine.show_interact = True
+
+
+class InteractAction(Action):
+    """Picks row `index` from engine.interact_options (see
+    OpenInteractMenuAction) -- same number-key row as UseItemAction/
+    BarterAction (see input_handlers.py). Closes the menu either way: a
+    resolved pick is done, and an out-of-range index (a stray number key past
+    however many rows are actually listed) is the same free no-op the other
+    modals already give a slot with nothing behind it. Adopts the picked
+    action's own costs_turn rather than always costing a turn itself, since
+    e.g. "Trade with X" (OpenBarterAction) only opens a screen and shouldn't
+    burn a turn just for that."""
+
+    def __init__(self, entity: "Entity", index: int) -> None:
+        super().__init__(entity)
+        self.index = index
+
+    def perform(self, engine: "Engine") -> None:
+        options = engine.interact_options
+        engine.show_interact = False
+        engine.interact_options = []
+
+        if not (0 <= self.index < len(options)):
+            self.costs_turn = False
+            return
+
+        action = options[self.index].action
+        action.perform(engine)
+        self.costs_turn = action.costs_turn

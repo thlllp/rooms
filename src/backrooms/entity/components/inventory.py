@@ -38,9 +38,10 @@ def store_or_drop(
 ) -> None:
     """Give `item` to the player if the pack has room, else drop it on the
     map at (drop_x, drop_y) -- the shared "a find has to land somewhere"
-    resolution behind both furniture salvage (actions.SalvageAction) and
-    debris piles (hazard.tick_debris_pile), so the capacity check and the
-    place-on-floor fallback can't drift between them. Logs stored_message on
+    resolution behind furniture salvage (actions.SalvageAction), containers
+    (actions.OpenContainerAction), and debris piles (actions.SearchDebrisAction),
+    so the capacity check and the place-on-floor fallback can't drift between
+    them. Logs stored_message on
     a successful stow, dropped_message when the pack was full. Callers pass
     the drop tile explicitly since it differs (the debris/furniture's own
     tile), and phrase their own messages since the flavor differs."""
