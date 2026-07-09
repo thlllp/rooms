@@ -12,10 +12,12 @@ from typing import TYPE_CHECKING, Callable
 
 from backrooms.constants import Color
 from backrooms.entity.components.base_component import BaseComponent
-from backrooms.entity.components.inventory import effective_capacity
+from backrooms.entity.components.equipment import worn_slot_effect
 from backrooms.geometry import chebyshev_distance
 
 if TYPE_CHECKING:
+    import random
+
     from backrooms.engine import Engine
     from backrooms.entity.entity import Entity
 
@@ -24,17 +26,29 @@ SPORE_DAMAGE_KIND = "spore_damage"
 
 @dataclass(frozen=True)
 class LootEntry:
-    """One possible debris-pile find and its relative weight within that
-    pile's own pool -- see make_debris_pile. `weight` is relative, not a
-    per-entry probability (unlike world.level_registry.SpawnEntry.weight,
-    which gates whether an entry is attempted at all): a pool of two
-    weight=1.0 entries and one weight=0.2 entry picks that third one roughly
-    1/5th as often as either of the other two, not "20% independent chance."
-    Lets the same item (e.g. a Simple Backpack) be common in one debris
-    pile's pool and rare in another's, without touching tick_debris_pile."""
+    """One possible find and its relative weight within a pool -- see
+    components.debris.DebrisComponent/components.container.ContainerComponent.
+    `weight` is relative, not a per-entry probability (unlike
+    world.level_registry.SpawnEntry.weight, which gates whether an entry is
+    attempted at all): a pool of two weight=1.0 entries and one weight=0.2
+    entry picks that third one roughly 1/5th as often as either of the other
+    two, not "20% independent chance." Lets the same item (e.g. a Simple
+    Backpack) be common in one pile's/container's pool and rare in another's,
+    without touching pick_loot."""
 
     factory: Callable[[], "Entity"]
     weight: float = 1.0
+
+
+def pick_loot(rng: "random.Random", pool: tuple["LootEntry", ...]) -> "Entity":
+    """Builds one freshly-spawned item from `pool`, chosen by LootEntry.weight
+    (see its docstring) -- the shared weighted-pick used by both debris piles
+    (actions.SearchDebrisAction) and searchable containers
+    (actions.OpenContainerAction), so the weighting rule lives in one place.
+    Drawn from `rng` (engine.rng) rather than the global random so a seed
+    reproduces the same finds."""
+    entry = rng.choices(pool, weights=[e.weight for e in pool], k=1)[0]
+    return entry.factory()
 
 
 class HazardComponent(BaseComponent):
@@ -97,11 +111,9 @@ def tick_spore_damage(entity: "Entity", engine: "Engine") -> None:
     # A worn face-slot item (see EquippableComponent.spore_resistance, e.g.
     # the crafted Mask) blunts this specifically -- a respiratory hazard, not
     # a generic one -- rather than a blanket damage-reduction stat. This is
-    # the single-slot equip-effect pattern (see EquipmentComponent's own
-    # docstring for when to use this vs. a pool-wide summed method like
-    # capacity_bonus).
-    mask = player.equipment.slots.get("face") if player.equipment is not None else None
-    spore_resistance = mask.equippable.spore_resistance if mask is not None and mask.equippable is not None else 0.0
+    # the single-slot equip-effect pattern (see equipment.worn_slot_effect,
+    # shared with disease_system's feet-slot flood resistance).
+    spore_resistance = worn_slot_effect(player, "face", "spore_resistance")
     severity = entity.hazard.severity * (1.0 - spore_resistance)
 
     if severity <= 0:
@@ -214,42 +226,6 @@ def tick_unstable_floor(entity: "Entity", engine: "Engine") -> None:
         engine.message_log.add_message("The floor gives way beneath your feet.", color=Color.WARNING)
 
 
-def tick_debris_pile(entity: "Entity", engine: "Engine") -> None:
-    """One-shot: the moment the player steps onto it, the pile resolves into
-    either a useful item dropped underfoot or a jolt of bad luck that drains
-    sanity instead, then removes itself -- searching the same debris twice
-    wouldn't mean anything."""
-    player = engine.player
-    if (player.x, player.y) != (entity.x, entity.y):
-        return
-
-    data = entity.hazard.data
-    if engine.rng.random() < data["good_chance"]:
-        entries: tuple[LootEntry, ...] = data["item_factories"]
-        entry = engine.rng.choices(entries, weights=[e.weight for e in entries], k=1)[0]
-        item = entry.factory()
-        # Put the find straight into the pack rather than dropping it on the
-        # tile the player is already standing on -- there it renders hidden
-        # under the player and reads as "the message lied, nothing appeared."
-        # Fall back to the floor only when there's genuinely no room.
-        inventory = player.inventory
-        if inventory is not None and len(inventory.items) < effective_capacity(player):
-            inventory.items.append(item)
-            engine.message_log.add_message(f"You dig through the debris and find a {item.name}.", color=Color.WHITE)
-        else:
-            item.place(entity.x, entity.y)
-            engine.game_map.entities.add(item)
-            engine.message_log.add_message(
-                f"You find a {item.name}, but your pack is full -- it's at your feet.", color=Color.WHITE
-            )
-    else:
-        if player.sanity is not None:
-            player.sanity.drain(entity.hazard.severity)
-        engine.message_log.add_message("Something about the debris unsettles you.", color=Color.HAZARD)
-
-    engine.game_map.entities.discard(entity)
-
-
 def make_spore_zone(*, radius: int = 1, severity: float = 2.0) -> HazardComponent:
     return HazardComponent(SPORE_DAMAGE_KIND, tick_spore_damage, severity=severity, data={"radius": radius})
 
@@ -299,17 +275,3 @@ def make_unstable_floor(*, collapse_threshold: int = 4, event_flag: str = "floor
     )
 
 
-def make_debris_pile(
-    *, item_factories: tuple[LootEntry, ...], good_chance: float = 0.6, sanity_penalty: float = 10.0
-) -> HazardComponent:
-    """`item_factories` is a weighted pool, not a single fixed item -- one
-    LootEntry is picked per its weight on a good outcome, so a debris pile
-    can turn up any of several different possible finds instead of always
-    the same one, and different debris piles can weight the same item
-    differently (see LootEntry)."""
-    return HazardComponent(
-        "debris_pile",
-        tick_debris_pile,
-        severity=sanity_penalty,
-        data={"good_chance": good_chance, "item_factories": item_factories},
-    )

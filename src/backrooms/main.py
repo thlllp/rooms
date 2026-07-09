@@ -20,6 +20,8 @@ from backrooms.actions import (
     BarterAction,
     BumpAction,
     EscapeAction,
+    InteractAction,
+    OpenInteractMenuAction,
     ToggleCharacterScreenAction,
     ToggleInventoryAction,
     ToggleLookModeAction,
@@ -45,9 +47,10 @@ DEV_INVINCIBLE_POOL = 999_999
 # show_character_screen was never reset on a level transition).
 MODE_ALLOWED_ACTIONS: dict[str, tuple[type, ...]] = {
     "show_character_screen": (ToggleCharacterScreenAction, EscapeAction),
-    "look_mode": (BumpAction, ToggleLookModeAction, EscapeAction),
+    "look_mode": (BumpAction, ToggleLookModeAction, OpenInteractMenuAction, EscapeAction),
     "show_inventory": (UseItemAction, ToggleInventoryAction, EscapeAction),
     "show_barter": (BarterAction, EscapeAction),
+    "show_interact": (InteractAction, EscapeAction),
 }
 assert set(MODE_ALLOWED_ACTIONS) == set(MODAL_FLAGS), "MODE_ALLOWED_ACTIONS must cover exactly Engine.MODAL_FLAGS"
 

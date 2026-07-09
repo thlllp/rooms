@@ -11,6 +11,8 @@ from backrooms.actions import (
     BumpAction,
     CraftAction,
     EscapeAction,
+    InteractAction,
+    OpenInteractMenuAction,
     PickupAction,
     ToggleCharacterScreenAction,
     ToggleInventoryAction,
@@ -56,6 +58,7 @@ PICKUP_KEYS = {tcod.event.KeySym.G}
 LIGHT_KEYS = {tcod.event.KeySym.F}
 AUTO_EXPLORE_KEYS = {tcod.event.KeySym.HOME}
 CRAFT_KEYS = {tcod.event.KeySym.R}
+INTERACT_KEYS = {tcod.event.KeySym.SPACE}
 
 # Top-row number keys (not the numpad -- those are already movement) select
 # an inventory slot while the inventory screen is open.
@@ -116,14 +119,19 @@ class EventHandler(tcod.event.EventDispatch[Action]):
             return AutoExploreAction(self.actor)
         if key in CRAFT_KEYS:
             return CraftAction(self.actor)
+        if key in INTERACT_KEYS:
+            return OpenInteractMenuAction(self.actor)
         if key in INVENTORY_SLOT_KEYS:
             # The number row means "pick offer N" while the barter screen is
-            # open, and "use/equip slot N" otherwise -- the two never coexist
-            # (both are modal), and main.MODE_ALLOWED_ACTIONS gates each so a
-            # stray number key does nothing outside its own screen.
+            # open, "pick interact-menu row N" while that's open, and
+            # "use/equip slot N" otherwise -- the three never coexist (all
+            # modal), and main.MODE_ALLOWED_ACTIONS gates each so a stray
+            # number key does nothing outside its own screen.
             slot = INVENTORY_SLOT_KEYS[key]
             if self.engine.show_barter:
                 return BarterAction(self.actor, slot)
+            if self.engine.show_interact:
+                return InteractAction(self.actor, slot)
             return UseItemAction(self.actor, slot)
         if key in MOVE_KEYS:
             dx, dy = MOVE_KEYS[key]

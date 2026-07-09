@@ -311,10 +311,15 @@ def render_travel_path(console: "tcod.console.Console", engine: "Engine") -> Non
         console.rgb[target_x, target_y]["bg"] = Color.TRAVEL_TARGET_BG
 
 
-def render_look_background(console: "tcod.console.Console", *, y: int, width: int) -> None:
-    """Highlighted backdrop behind the two look-mode text rows -- makes them
-    read as a distinct block instead of blending into the panel's black."""
-    console.draw_rect(x=0, y=y, width=width, height=2, ch=ord(" "), bg=Color.LOOK_BG)
+def render_look_background(console: "tcod.console.Console", *, y: int, height: int, width: int) -> None:
+    """Highlighted backdrop behind look mode's reserved panel rows -- the two
+    look-mode text rows plus, while the interact menu is also open (see
+    render_interact_menu), whatever rows that occupies below them -- so it
+    reads as one distinct block instead of blending into the panel's black.
+    `height` is the panel's full remaining height at this point (see
+    render_ui), not just the two look-mode lines, since the caller doesn't
+    yet know whether the interact menu will also claim some of it."""
+    console.draw_rect(x=0, y=y, width=width, height=max(2, height), ch=ord(" "), bg=Color.LOOK_BG)
 
 
 def render_look_line(console: "tcod.console.Console", engine: "Engine", *, x: int, y: int) -> None:
@@ -329,6 +334,20 @@ def render_look_flavor_line(console: "tcod.console.Console", engine: "Engine", *
         console.print(x, y, text, fg=Color.LOOK_FLAVOR_TEXT, bg=Color.LOOK_BG)
 
 
+def render_interact_menu(console: "tcod.console.Console", engine: "Engine", *, x: int, y: int, height: int) -> None:
+    """Rendered in place of the message log (see render_ui) while
+    engine.show_interact is set -- reuses the look-mode background so the
+    menu reads as part of the same highlighted block as the look line above
+    it, rather than a separate screen. Row numbers here are exactly what
+    InteractAction expects (see input_handlers.INVENTORY_SLOT_KEYS). Only as
+    many rows as actually fit are printed -- `height` is whatever's left of
+    the panel after the look-mode lines above it, which is small."""
+    options = engine.interact_options
+    console.print(x, y, "Interact:", fg=Color.LOOK_TEXT, bg=Color.LOOK_BG)
+    for i, option in enumerate(options[: max(0, height - 1)]):
+        console.print(x, y + 1 + i, f"{i + 1}) {option.label}", fg=Color.WHITE, bg=Color.LOOK_BG)
+
+
 def render_ui(console: "tcod.console.Console", engine: "Engine", *, panel_height: int) -> None:
     map_height = console.height - panel_height
     console.draw_rect(x=0, y=map_height, width=console.width, height=panel_height, ch=ord(" "), bg=Color.BLACK)
@@ -340,14 +359,24 @@ def render_ui(console: "tcod.console.Console", engine: "Engine", *, panel_height
     log_y = map_height + 4
     log_height = panel_height - 4
     if engine.look_mode:
-        render_look_background(console, y=log_y, width=console.width)
+        # One shared background fill for the whole reserved block -- the two
+        # look-mode lines, plus (while show_interact is also set, see
+        # actions.OpenInteractMenuAction) whatever's left of the panel for
+        # the interact menu -- so the highlighted backdrop reads as one
+        # continuous block instead of two separately-painted rects.
+        render_look_background(console, y=log_y, height=log_height, width=console.width)
         render_look_line(console, engine, x=1, y=log_y)
         log_y += 1
         log_height -= 1
         render_look_flavor_line(console, engine, x=1, y=log_y)
         log_y += 1
         log_height -= 1
-    render_message_log(console, engine, x=1, y=log_y, height=log_height)
+        if engine.show_interact:
+            render_interact_menu(console, engine, x=1, y=log_y, height=log_height)
+        else:
+            render_message_log(console, engine, x=1, y=log_y, height=log_height)
+    else:
+        render_message_log(console, engine, x=1, y=log_y, height=log_height)
 
     console.print(console.width - 15, map_height, "[C] Character", fg=Color.GREY)
     console.print(console.width - 15, map_height + 1, "[X] Look", fg=Color.GREY)
@@ -355,6 +384,7 @@ def render_ui(console: "tcod.console.Console", engine: "Engine", *, panel_height
     console.print(console.width - 15, map_height + 3, "[G] Pick up", fg=Color.GREY)
     console.print(console.width - 15, map_height + 4, "[F] Light", fg=Color.GREY)
     console.print(console.width - 15, map_height + 5, "[Home] Explore", fg=Color.GREY)
+    console.print(console.width - 15, map_height + 6, "[Space] Interact", fg=Color.GREY)
 
 
 def render_character_screen(console: "tcod.console.Console", engine: "Engine") -> None:
@@ -457,8 +487,12 @@ def render_character_screen(console: "tcod.console.Console", engine: "Engine") -
 
 def render_inventory_screen(console: "tcod.console.Console", engine: "Engine") -> None:
     """A full-console modal, toggled by ToggleInventoryAction. Number keys
-    1-9 select a row to use (see input_handlers.INVENTORY_SLOT_KEYS) --
-    the row number printed here is exactly the slot UseItemAction expects."""
+    1-9 select a row to use (see input_handlers.INVENTORY_SLOT_KEYS) -- the
+    row number printed here is exactly the slot UseItemAction expects, held
+    items first then equipped (see EquipmentComponent.equipped_items), so
+    this split into two visually separate "Held"/"Worn" blocks is purely
+    cosmetic -- the numbering underneath is one continuous sequence across
+    both, unchanged from before this split existed."""
     console.clear(ch=ord(" "), fg=Color.WHITE, bg=Color.BLACK)
 
     player = engine.player
@@ -477,15 +511,36 @@ def render_inventory_screen(console: "tcod.console.Console", engine: "Engine") -
 
     held = player.inventory.items if player.inventory is not None else []
     equipped = player.equipment.equipped_items() if player.equipment is not None else []
-    combined = held + equipped
-    if not combined:
-        console.print(4, 3, "(empty)", fg=Color.GREY)
-    else:
-        for i, item in enumerate(combined):
-            suffix = " [worn]" if i >= len(held) else ""
-            console.print(4, 3 + i, f"{i + 1}) {item.name}{suffix}", fg=Color.WHITE)
 
-    console.print(4, console.height - 3, "[1-9] Use/Equip  [I/Esc] Close", fg=Color.GREY)
+    if not held and not equipped:
+        console.print(4, 3, "(empty)", fg=Color.GREY)
+        console.print(4, console.height - 3, "[1-9] Equip  [I/Esc] Close", fg=Color.GREY)
+        return
+
+    row = 3
+    console.print(4, row, "Held", fg=Color.GREY)
+    row += 1
+    if not held:
+        console.print(4, row, "  (nothing held)", fg=Color.GREY)
+        row += 1
+    else:
+        for i, item in enumerate(held):
+            console.print(4, row, f"{i + 1}) {item.name}", fg=Color.WHITE)
+            row += 1
+
+    row += 1
+    console.print(4, row, "Worn", fg=Color.GREY)
+    row += 1
+    if not equipped:
+        console.print(4, row, "  (nothing equipped)", fg=Color.GREY)
+        row += 1
+    else:
+        for i, item in enumerate(equipped):
+            slot_label = item.equippable.slot.replace("_", " ")
+            console.print(4, row, f"{len(held) + i + 1}) {item.name} ({slot_label})", fg=Color.WHITE)
+            row += 1
+
+    console.print(4, console.height - 3, "[1-9] Equip/Unequip  [I/Esc] Close", fg=Color.GREY)
 
 
 def render_barter_screen(console: "tcod.console.Console", engine: "Engine") -> None:

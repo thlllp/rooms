@@ -29,6 +29,7 @@ from backrooms.entity.components.perception import PerceptionComponent
 from backrooms.entity.components.quickness import QuicknessComponent
 from backrooms.entity.components.sanity import SanityComponent
 from backrooms.entity.entity import Entity, RenderOrder
+from backrooms.data.registrations import spawn_cotton_tshirt, spawn_faded_jeans, spawn_sneakers
 
 # Shared baseline every class starts from -- a class only overrides the one
 # or two attributes that make it distinct (see PLAYER_CLASSES below). Tied
@@ -76,7 +77,7 @@ def build_player(player_class: PlayerClass) -> Entity:
         strength=player_class.strength,
         luck=player_class.luck,
     )
-    return Entity(
+    player = Entity(
         0,
         0,
         char="@",
@@ -105,3 +106,12 @@ def build_player(player_class: PlayerClass) -> Entity:
         equipment=EquipmentComponent(),
         afflictions=AfflictionsComponent(),
     )
+    # Ordinary clothes, not gear -- the same plain chest/legs/feet items a
+    # debris pile can turn up (see data.registrations), just worn from the
+    # start rather than found. None grant any passive effect
+    # (EquippableComponent.grants_benefit is False for all three); a fresh
+    # character just isn't naked, nothing more.
+    player.equipment.slots["chest"] = spawn_cotton_tshirt()
+    player.equipment.slots["legs"] = spawn_faded_jeans()
+    player.equipment.slots["feet"] = spawn_sneakers()
+    return player
